@@ -16,6 +16,13 @@ BENCH_COMPARE_CC := $(BENCH_COMPARE_BUILD)/cc
 BENCH_COMPARE_VERSTABLE := $(BENCH_COMPARE_BUILD)/verstable
 BENCH_COMPARE_KHASHL := $(BENCH_COMPARE_BUILD)/khashl
 BENCH_COMPARE_KHASH := $(BENCH_COMPARE_BUILD)/khash
+BENCH_COMPARE_MLIB := $(BENCH_COMPARE_BUILD)/mlib
+BENCH_COMPARE_STC := $(BENCH_COMPARE_BUILD)/stc
+BENCH_COMPARE_STB_DS := $(BENCH_COMPARE_BUILD)/stb_ds
+BENCH_COMPARE_TYPED_TEST_SRC := tests/test_typed_adapter.c
+BENCH_COMPARE_MLIB_TEST := $(BENCH_COMPARE_BUILD)/test_mlib_adapter
+BENCH_COMPARE_STC_TEST := $(BENCH_COMPARE_BUILD)/test_stc_adapter
+BENCH_COMPARE_STB_DS_TEST := $(BENCH_COMPARE_BUILD)/test_stb_ds_adapter
 BENCH_COMPARE_KHASHL_FAULT_U64 := \
 	$(BENCH_COMPARE_BUILD)/khashl_init_fail_u64
 BENCH_COMPARE_KHASHL_FAULT_CSTR := \
@@ -147,6 +154,81 @@ $(BENCH_COMPARE_KHASH): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
 		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
 		$(BENCH_ALLOC_SRC) bench/compare/adapters/khash_adapter.c -o $@
 
+$(BENCH_COMPARE_MLIB): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/mlib_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/mlib/m-core.h \
+		$(BENCH_COMPARE_COMPETITORS)/mlib/m-dict.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/mlib \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/mlib_adapter.c -o $@
+
+$(BENCH_COMPARE_STC): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/stc_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/stc/include/stc/common.h \
+		$(BENCH_COMPARE_COMPETITORS)/stc/include/stc/hashmap.h \
+		$(BENCH_COMPARE_COMPETITORS)/stc/include/stc/hmap.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/stc/include \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/stc_adapter.c -o $@
+
+$(BENCH_COMPARE_STB_DS): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/stb_ds_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/stb_ds/stb_ds.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/stb_ds \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/stb_ds_adapter.c -o $@
+
+$(BENCH_COMPARE_MLIB_TEST): $(BENCH_COMPARE_TYPED_TEST_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/mlib_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/mlib/m-core.h \
+		$(BENCH_COMPARE_COMPETITORS)/mlib/m-dict.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/mlib \
+		$(BENCH_COMPARE_TYPED_TEST_SRC) $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/mlib_adapter.c -o $@
+
+$(BENCH_COMPARE_STC_TEST): $(BENCH_COMPARE_TYPED_TEST_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/stc_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/stc/include/stc/common.h \
+		$(BENCH_COMPARE_COMPETITORS)/stc/include/stc/hashmap.h \
+		$(BENCH_COMPARE_COMPETITORS)/stc/include/stc/hmap.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/stc/include \
+		$(BENCH_COMPARE_TYPED_TEST_SRC) $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/stc_adapter.c -o $@
+
+$(BENCH_COMPARE_STB_DS_TEST): $(BENCH_COMPARE_TYPED_TEST_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/stb_ds_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/stb_ds/stb_ds.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/stb_ds \
+		$(BENCH_COMPARE_TYPED_TEST_SRC) $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/stb_ds_adapter.c -o $@
+
 $(BENCH_COMPARE_KHASHL_FAULT_U64): tests/test_khashl_init_fault.c \
 		$(BENCH_COMPARE_DRIVER_SRC) \
 		$(BENCH_COMMON_SRC) $(BENCH_ALLOC_SRC) \
@@ -222,6 +304,12 @@ bench-compare-smoke: bench-compare-lock $(BENCH_COMPARE_FHMAP) \
 		$(BENCH_COMPARE_VERSTABLE) \
 		$(BENCH_COMPARE_KHASHL) \
 		$(BENCH_COMPARE_KHASH) \
+		$(BENCH_COMPARE_MLIB) \
+		$(BENCH_COMPARE_STC) \
+		$(BENCH_COMPARE_STB_DS) \
+		$(BENCH_COMPARE_MLIB_TEST) \
+		$(BENCH_COMPARE_STC_TEST) \
+		$(BENCH_COMPARE_STB_DS_TEST) \
 		$(BENCH_COMPARE_KHASHL_FAULT_U64) \
 		$(BENCH_COMPARE_KHASHL_FAULT_CSTR) \
 		$(BENCH_COMPARE_KHASH_RESERVE_TEST) \

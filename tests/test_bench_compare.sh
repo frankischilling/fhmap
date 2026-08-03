@@ -541,19 +541,20 @@ printf '%s\n' "$tiny_output" | awk -F '\t' '
     }
 '
 
-for adapter_name in cc verstable khashl khash
-do
-    adapter_binary=./build/bench-compare/$adapter_name
-    test -x "$adapter_binary"
-    adapter_output=$($adapter_binary --smoke --count 32 --samples 3)
-    printf '%s\n' "$adapter_output" | awk -F '\t' -v map="$adapter_name" '
+check_adapter_output()
+{
+    checked_map=$1
+    checked_count=$2
+    checked_samples=$3
+    awk -F '\t' -v map="$checked_map" -v count="$checked_count" \
+        -v samples="$checked_samples" '
         BEGIN {
             split("insert_reserved insert_growing update lookup_hit lookup_miss erase iterate", workloads, " ")
         }
         {
             if (NF != 15 || $1 != "result" || $2 != map) exit 1
             if ($3 != "u64" && $3 != "cstr") exit 1
-            if ($5 != "32" || $6 != "3" || $9 != "ok") exit 1
+            if ($5 != count || $6 != samples || $9 != "ok") exit 1
             if ($7 !~ /^[0-9]+([.][0-9]+)?$/ ||
                 $8 !~ /^[0-9]+([.][0-9]+)?$/) exit 1
             if (($7 + 0) <= 0 || ($8 + 0) < 0) exit 1
@@ -578,7 +579,29 @@ do
             }
         }
     '
+}
+
+for adapter_name in cc verstable khashl khash mlib stc stb_ds
+do
+    adapter_binary=./build/bench-compare/$adapter_name
+    test -x "$adapter_binary"
+    adapter_output=$($adapter_binary --smoke --count 32 --samples 3)
+    printf '%s\n' "$adapter_output" |
+        check_adapter_output "$adapter_name" 32 3
+    adapter_output=$($adapter_binary --smoke --count 1 --samples 1)
+    printf '%s\n' "$adapter_output" |
+        check_adapter_output "$adapter_name" 1 1
+    adapter_output=$($adapter_binary --smoke --count 4096 --samples 1)
+    printf '%s\n' "$adapter_output" |
+        check_adapter_output "$adapter_name" 4096 1
+    adapter_output=$($adapter_binary --seed 0 --count 32 --samples 1)
+    printf '%s\n' "$adapter_output" |
+        check_adapter_output "$adapter_name" 32 1
 done
+
+./build/bench-compare/test_mlib_adapter
+./build/bench-compare/test_stc_adapter
+./build/bench-compare/test_stb_ds_adapter
 
 expect_khashl_init_failure()
 {
