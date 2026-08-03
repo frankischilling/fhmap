@@ -3,6 +3,7 @@
 #include "bench_common.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -194,4 +195,36 @@ double bench_mad(double *values, size_t count, double median)
     result = bench_sorted_median(deviations, count);
     free(deviations);
     return result;
+}
+
+bool bench_statistics(double *values, size_t count, double *median_out,
+                      double *mad_out)
+{
+    double median;
+    double mad;
+    size_t i;
+
+    if (values == NULL || count == 0u || median_out == NULL ||
+        mad_out == NULL) {
+        return false;
+    }
+    for (i = 0; i < count; ++i) {
+        if (!isfinite(values[i])) return false;
+    }
+
+    median = bench_sorted_median(values, count);
+    if (!isfinite(median)) return false;
+    for (i = 0; i < count; ++i) {
+        const double deviation = values[i] >= median
+                                     ? values[i] - median
+                                     : median - values[i];
+
+        if (!isfinite(deviation)) return false;
+        values[i] = deviation;
+    }
+    mad = bench_sorted_median(values, count);
+    if (!isfinite(mad)) return false;
+    *median_out = median;
+    *mad_out = mad;
+    return true;
 }

@@ -23,5 +23,7 @@ void bench_dataset_destroy(bench_dataset *data);
 double bench_seconds_now(void);
 double bench_median(double *values, size_t count);
 double bench_mad(double *values, size_t count, double median);
+bool bench_statistics(double *values, size_t count, double *median,
+                      double *mad);
 
 #endif

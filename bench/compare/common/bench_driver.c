@@ -52,6 +52,12 @@ static const char *const bench_workload_names[BENCH_WORKLOAD_COUNT] = {
     "iterate"
 };
 
+static const double bench_min_sample_seconds = 0.010;
+enum {
+    BENCH_MAX_SAMPLE_REPETITIONS = 1000000,
+    BENCH_MIN_TIMED_INTERVAL_OPERATIONS = 256
+};
+
 static const char *bench_key_kind_name(bench_key_kind kind)
 {
     return kind == BENCH_KEYS_U64 ? "u64" : "cstr";
@@ -336,13 +342,25 @@ static bool bench_execute_workload(void *map, bench_key_kind kind,
                                    bench_workload workload,
                                    const bench_dataset *data,
                                    const bench_prepared_values *values,
-                                   uint64_t *checksum, double *elapsed)
+                                   uint64_t *checksum, double *elapsed,
+                                   size_t *operation_count)
 {
     uint64_t result = 0;
     double start;
     double finish;
     bool ok = true;
     size_t index;
+    size_t pass;
+    size_t passes = 1u;
+
+    if (workload == BENCH_UPDATE || workload == BENCH_LOOKUP_HIT ||
+        workload == BENCH_LOOKUP_MISS || workload == BENCH_ITERATE) {
+        passes = data->count < BENCH_MIN_TIMED_INTERVAL_OPERATIONS
+                     ? 1u + ((size_t)BENCH_MIN_TIMED_INTERVAL_OPERATIONS - 1u) /
+                                  data->count
+                     : 1u;
+    }
+    if (data->count > SIZE_MAX / passes) return false;
 
     start = bench_seconds_now();
     if (!(start > 0.0) || !isfinite(start)) return false;
@@ -361,35 +379,42 @@ static bool bench_execute_workload(void *map, bench_key_kind kind,
             }
             break;
         case BENCH_UPDATE:
-            for (index = 0; index < data->count; ++index) {
-                bool inserted = true;
+            for (pass = 0; pass < passes && ok; ++pass) {
+                for (index = 0; index < data->count; ++index) {
+                    bool inserted = true;
 
-                if (!bench_put_item(map, kind, data, index,
-                                    values->updated[index], &inserted) ||
-                    inserted) {
-                    ok = false;
-                    break;
+                    if (!bench_put_item(map, kind, data, index,
+                                        values->updated[index], &inserted) ||
+                        inserted) {
+                        ok = false;
+                        break;
+                    }
                 }
             }
             break;
         case BENCH_LOOKUP_HIT:
-            for (index = 0; index < data->count; ++index) {
-                uint64_t value = 0;
+            for (pass = 0; pass < passes && ok; ++pass) {
+                for (index = 0; index < data->count; ++index) {
+                    uint64_t value = 0;
 
-                if (!bench_get_item(map, kind, data, index, false, &value) ||
-                    value != values->original[index]) {
-                    ok = false;
-                    break;
+                    if (!bench_get_item(map, kind, data, index, false,
+                                        &value) ||
+                        value != values->original[index]) {
+                        ok = false;
+                        break;
+                    }
                 }
             }
             break;
         case BENCH_LOOKUP_MISS:
-            for (index = 0; index < data->count; ++index) {
-                uint64_t value = 0;
+            for (pass = 0; pass < passes && ok; ++pass) {
+                for (index = 0; index < data->count; ++index) {
+                    uint64_t value = 0;
 
-                if (bench_get_item(map, kind, data, index, true, &value)) {
-                    ok = false;
-                    break;
+                    if (bench_get_item(map, kind, data, index, true, &value)) {
+                        ok = false;
+                        break;
+                    }
                 }
             }
             break;
@@ -402,11 +427,16 @@ static bool bench_execute_workload(void *map, bench_key_kind kind,
             }
             break;
         case BENCH_ITERATE: {
-            size_t seen = 0;
+            for (pass = 0; pass < passes && ok; ++pass) {
+                uint64_t pass_checksum = 0;
+                size_t seen = 0;
 
-            if (!bench_adapter.iterate(map, &result, &seen) ||
-                seen != data->count) {
-                ok = false;
+                if (!bench_adapter.iterate(map, &pass_checksum, &seen) ||
+                    seen != data->count ||
+                    pass_checksum != values->original_checksum) {
+                    ok = false;
+                }
+                result = pass_checksum;
             }
             break;
         }
@@ -415,12 +445,13 @@ static bool bench_execute_workload(void *map, bench_key_kind kind,
             break;
     }
     finish = bench_seconds_now();
-    if (!(finish > 0.0) || !isfinite(finish) || finish < start) return false;
+    if (!(finish > 0.0) || !isfinite(finish) || finish <= start) return false;
     if (workload != BENCH_ITERATE) {
         result = bench_expected_checksum(values, workload);
     }
     *checksum = result;
     *elapsed = finish - start;
+    *operation_count = data->count * passes;
     return ok;
 }
 
@@ -435,10 +466,13 @@ static bool bench_sample_matches(const bench_sample_result *left,
            left->capacity == right->capacity;
 }
 
-static bool bench_run_sample(const bench_dataset *data, bench_key_kind kind,
-                             const bench_prepared_values *values,
-                             bench_workload workload, double *nanoseconds,
-                             bench_sample_result *sample)
+static bool bench_run_repetition(const bench_dataset *data,
+                                 bench_key_kind kind,
+                                 const bench_prepared_values *values,
+                                 bench_workload workload,
+                                 double *elapsed_seconds,
+                                 size_t *operation_count,
+                                 bench_sample_result *sample)
 {
     const bool insert_workload = workload == BENCH_INSERT_RESERVED ||
                                  workload == BENCH_INSERT_GROWING;
@@ -473,7 +507,7 @@ static bool bench_run_sample(const bench_dataset *data, bench_key_kind kind,
         goto cleanup;
     }
     if (!bench_execute_workload(map, kind, workload, data, values, &checksum,
-                                &elapsed)) {
+                                &elapsed, operation_count)) {
         failure = "timed operation or clock failed";
         goto cleanup;
     }
@@ -496,8 +530,8 @@ static bool bench_run_sample(const bench_dataset *data, bench_key_kind kind,
         failure = "invalid map accounting";
         goto cleanup;
     }
-    *nanoseconds = elapsed * 1e9 / (double)data->count;
-    if (!isfinite(*nanoseconds) || *nanoseconds < 0.0) {
+    *elapsed_seconds = elapsed;
+    if (!isfinite(*elapsed_seconds) || !(*elapsed_seconds > 0.0)) {
         failure = "invalid elapsed time";
         goto cleanup;
     }
@@ -517,6 +551,73 @@ cleanup:
     return true;
 }
 
+static bool bench_run_batched_sample(
+    const bench_dataset *data, bench_key_kind kind,
+    const bench_prepared_values *values, bench_workload workload,
+    double *nanoseconds, bench_sample_result *sample)
+{
+    bench_sample_result reference = {0, 0, {0, 0, 0, 0}, 0};
+    double total_seconds = 0.0;
+    size_t total_operations = 0;
+    size_t repetitions = 0;
+
+    while (total_seconds < bench_min_sample_seconds) {
+        bench_sample_result current;
+        double elapsed_seconds;
+        double next_total;
+        size_t repetition_operations;
+
+        if (repetitions == (size_t)BENCH_MAX_SAMPLE_REPETITIONS) {
+            fprintf(stderr, "%s: %s/%s: sample repetition limit reached\n",
+                    bench_adapter.name, bench_key_kind_name(kind),
+                    bench_workload_names[workload]);
+            return false;
+        }
+        if (!bench_run_repetition(data, kind, values, workload,
+                                  &elapsed_seconds, &repetition_operations,
+                                  &current)) {
+            return false;
+        }
+        if (repetitions == 0u) {
+            reference = current;
+        } else if (!bench_sample_matches(&reference, &current)) {
+            fprintf(stderr, "%s: %s/%s: repetition metadata changed\n",
+                    bench_adapter.name, bench_key_kind_name(kind),
+                    bench_workload_names[workload]);
+            return false;
+        }
+        if (repetition_operations == 0u ||
+            repetition_operations > SIZE_MAX - total_operations) {
+            fprintf(stderr, "%s: %s/%s: operation count overflow\n",
+                    bench_adapter.name, bench_key_kind_name(kind),
+                    bench_workload_names[workload]);
+            return false;
+        }
+
+        next_total = total_seconds + elapsed_seconds;
+        if (!isfinite(next_total) || !(next_total > total_seconds)) {
+            fprintf(stderr, "%s: %s/%s: timer made no progress\n",
+                    bench_adapter.name, bench_key_kind_name(kind),
+                    bench_workload_names[workload]);
+            return false;
+        }
+        total_seconds = next_total;
+        total_operations += repetition_operations;
+        ++repetitions;
+    }
+
+    *nanoseconds = (double)((long double)total_seconds * 1.0e9L /
+                            (long double)total_operations);
+    if (!isfinite(*nanoseconds) || !(*nanoseconds > 0.0)) {
+        fprintf(stderr, "%s: %s/%s: invalid sample result\n",
+                bench_adapter.name, bench_key_kind_name(kind),
+                bench_workload_names[workload]);
+        return false;
+    }
+    *sample = reference;
+    return true;
+}
+
 static bool bench_run_scenario(const bench_options *options,
                                const bench_dataset *data,
                                const bench_prepared_values *values,
@@ -529,6 +630,9 @@ static bool bench_run_scenario(const bench_options *options,
     double mad;
     size_t bytes;
     size_t sample_index;
+    double warmup_elapsed;
+    size_t warmup_operations;
+    bench_sample_result warmup;
 
     if (options->samples > SIZE_MAX / sizeof(*samples)) {
         fputs("sample array is too large\n", stderr);
@@ -540,11 +644,16 @@ static bool bench_run_scenario(const bench_options *options,
         fputs("could not allocate sample array\n", stderr);
         return false;
     }
+    if (!bench_run_repetition(data, kind, values, workload,
+                              &warmup_elapsed, &warmup_operations, &warmup)) {
+        free(samples);
+        return false;
+    }
     for (sample_index = 0; sample_index < options->samples; ++sample_index) {
         bench_sample_result current;
 
-        if (!bench_run_sample(data, kind, values, workload,
-                              &samples[sample_index], &current)) {
+        if (!bench_run_batched_sample(data, kind, values, workload,
+                                      &samples[sample_index], &current)) {
             free(samples);
             return false;
         }
@@ -559,13 +668,12 @@ static bool bench_run_scenario(const bench_options *options,
         }
     }
 
-    median = bench_median(samples, options->samples);
-    mad = bench_mad(samples, options->samples, median);
-    free(samples);
-    if (!isfinite(median) || !isfinite(mad) || median < 0.0 || mad < 0.0) {
+    if (!bench_statistics(samples, options->samples, &median, &mad)) {
         fputs("invalid timing statistics\n", stderr);
+        free(samples);
         return false;
     }
+    free(samples);
     if (printf("result\t%s\t%s\t%s\t%zu\t%zu\t%.3f\t%.3f\tok\t%" PRIu64
                "\t%zu\t%zu\t%zu\t%zu\t%zu\n",
                bench_adapter.name, bench_key_kind_name(kind),

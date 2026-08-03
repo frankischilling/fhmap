@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -30,6 +31,42 @@ static void test_statistics(void)
     assert(memcmp(odd, odd_original, sizeof(odd)) == 0);
     assert(bench_median(NULL, 0) == 0.0);
     assert(bench_mad(NULL, 0, 0.0) == 0.0);
+}
+
+static void test_checked_statistics(void)
+{
+    double odd[] = {9.0, 1.0, 4.0};
+    double even[] = {8.0, 2.0, 6.0, 4.0};
+    double single[] = {7.0};
+    double not_finite[] = {1.0, INFINITY, 3.0};
+    double not_a_number[] = {1.0, NAN, 3.0};
+    double median = -1.0;
+    double mad = -1.0;
+
+    assert(bench_statistics(odd, 3, &median, &mad));
+    assert(median == 4.0);
+    assert(mad == 3.0);
+    assert(odd[0] == 0.0 && odd[1] == 3.0 && odd[2] == 5.0);
+
+    assert(bench_statistics(even, 4, &median, &mad));
+    assert(median == 5.0);
+    assert(mad == 2.0);
+    assert(even[0] == 1.0 && even[1] == 1.0 &&
+           even[2] == 3.0 && even[3] == 3.0);
+
+    assert(bench_statistics(single, 1, &median, &mad));
+    assert(median == 7.0);
+    assert(mad == 0.0);
+
+    median = 11.0;
+    mad = 12.0;
+    assert(!bench_statistics(NULL, 1, &median, &mad));
+    assert(!bench_statistics(odd, 0, &median, &mad));
+    assert(!bench_statistics(odd, 3, NULL, &mad));
+    assert(!bench_statistics(odd, 3, &median, NULL));
+    assert(!bench_statistics(not_finite, 3, &median, &mad));
+    assert(!bench_statistics(not_a_number, 3, &median, &mad));
+    assert(median == 11.0 && mad == 12.0);
 }
 
 static void assert_printable_string(const char *string)
@@ -99,6 +136,7 @@ int main(void)
 {
     test_mixer();
     test_statistics();
+    test_checked_statistics();
     test_dataset();
     test_dataset_rejects_invalid_input();
     puts("bench common tests passed");
