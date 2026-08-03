@@ -51,11 +51,6 @@ typedef struct bench_operation_result {
     uint64_t checksum;
 } bench_operation_result;
 
-typedef struct bench_lookup_result {
-    uint64_t value;
-    bool found;
-} bench_lookup_result;
-
 static const char *const bench_workload_names[BENCH_WORKLOAD_COUNT] = {
     "insert_reserved",
     "insert_growing",
@@ -417,29 +412,37 @@ static void bench_apply_workload(void *map, bench_key_kind kind,
     }
 }
 
+static void bench_prefault_lookup_values(uint64_t *values, size_t count)
+{
+    volatile uint64_t *volatile_values = values;
+    size_t index;
+
+    for (index = 0; index < count; ++index) volatile_values[index] = 0u;
+}
+
 static void bench_capture_lookup_hits(void *map, bench_key_kind kind,
                                       const bench_dataset *data,
-                                      bench_lookup_result *results)
+                                      bench_operation_result *result,
+                                      uint64_t *values)
 {
     size_t index;
 
     for (index = 0; index < data->count; ++index) {
-        results[index].found = bench_get_item(
-            map, kind, data, index, false, &results[index].value);
+        result->successful += (size_t)bench_get_item(
+            map, kind, data, index, false, &values[index]);
     }
 }
 
-static bool bench_lookup_results_are_valid(
-    const bench_lookup_result *results, const bench_dataset *data,
+static bool bench_lookup_values_are_valid(
+    const uint64_t *lookup_values, const bench_dataset *data,
     const bench_prepared_values *values)
 {
     bool valid = true;
     size_t index;
 
-    if (results == NULL) return false;
+    if (lookup_values == NULL) return false;
     for (index = 0; index < data->count; ++index) {
-        valid &= results[index].found;
-        valid &= results[index].value == values->original[index];
+        valid &= lookup_values[index] == values->original[index];
     }
     return valid;
 }
@@ -447,7 +450,7 @@ static bool bench_lookup_results_are_valid(
 static bool bench_operation_result_is_valid(
     const bench_operation_result *result, const bench_dataset *data,
     const bench_prepared_values *values, bench_workload workload,
-    const bench_lookup_result *lookup_results)
+    const uint64_t *lookup_values)
 {
     switch (workload) {
         case BENCH_INSERT_RESERVED:
@@ -457,12 +460,18 @@ static bool bench_operation_result_is_valid(
         case BENCH_UPDATE:
             return result->successful == data->count &&
                    result->inserted == 0u;
-        case BENCH_LOOKUP_HIT:
-            return lookup_results == NULL
-                       ? result->successful == data->count &&
-                             result->value_sum == values->original_value_sum
-                       : bench_lookup_results_are_valid(lookup_results, data,
-                                                        values);
+        case BENCH_LOOKUP_HIT: {
+            bool valid;
+
+            if (lookup_values == NULL) {
+                return result->successful == data->count &&
+                       result->value_sum == values->original_value_sum;
+            }
+            valid = result->successful == data->count;
+            valid &= bench_lookup_values_are_valid(lookup_values, data,
+                                                   values);
+            return valid;
+        }
         case BENCH_LOOKUP_MISS:
             return result->successful == 0u;
         case BENCH_ERASE:
@@ -569,14 +578,14 @@ static bool bench_run_timed_batch(const bench_dataset *data,
     const bool final_updated = workload == BENCH_UPDATE;
     const char *failure = NULL;
     bench_operation_result *results = NULL;
-    bench_lookup_result *lookup_results = NULL;
+    uint64_t *lookup_values = NULL;
     void **maps = NULL;
     double start = 0.0;
     double finish = 0.0;
     size_t map_count;
     size_t map_index;
     size_t operations;
-    size_t lookup_result_bytes = 0u;
+    size_t lookup_value_bytes = 0u;
     size_t pointer_bytes;
     size_t result_bytes;
 
@@ -592,24 +601,26 @@ static bool bench_run_timed_batch(const bench_dataset *data,
     }
     operations = data->count * map_count;
     if (workload == BENCH_LOOKUP_HIT) {
-        if (operations > SIZE_MAX / sizeof(*lookup_results)) {
-            failure = "lookup result array size overflow";
+        if (operations > SIZE_MAX / sizeof(*lookup_values)) {
+            failure = "lookup value array size overflow";
             goto cleanup;
         }
-        lookup_result_bytes = operations * sizeof(*lookup_results);
+        lookup_value_bytes = operations * sizeof(*lookup_values);
     }
     pointer_bytes = map_count * sizeof(*maps);
     result_bytes = map_count * sizeof(*results);
     maps = (void **)calloc(1u, pointer_bytes);
     results = (bench_operation_result *)calloc(1u, result_bytes);
     if (workload == BENCH_LOOKUP_HIT) {
-        lookup_results = (bench_lookup_result *)calloc(
-            1u, lookup_result_bytes);
+        lookup_values = (uint64_t *)malloc(lookup_value_bytes);
     }
     if (maps == NULL || results == NULL ||
-        (workload == BENCH_LOOKUP_HIT && lookup_results == NULL)) {
+        (workload == BENCH_LOOKUP_HIT && lookup_values == NULL)) {
         failure = "could not allocate timed batch";
         goto cleanup;
+    }
+    if (workload == BENCH_LOOKUP_HIT) {
+        bench_prefault_lookup_values(lookup_values, operations);
     }
 
     bench_alloc_reset();
@@ -629,8 +640,8 @@ static bool bench_run_timed_batch(const bench_dataset *data,
     for (map_index = 0; map_index < map_count; ++map_index) {
         if (workload == BENCH_LOOKUP_HIT) {
             bench_capture_lookup_hits(
-                maps[map_index], kind, data,
-                lookup_results + map_index * data->count);
+                maps[map_index], kind, data, &results[map_index],
+                lookup_values + map_index * data->count);
         } else {
             bench_apply_workload(maps[map_index], kind, workload, data,
                                  values, &results[map_index]);
@@ -642,7 +653,7 @@ static bool bench_run_timed_batch(const bench_dataset *data,
         if (!bench_operation_result_is_valid(&results[map_index], data,
                                              values, workload,
                                              workload == BENCH_LOOKUP_HIT
-                                                 ? lookup_results +
+                                                 ? lookup_values +
                                                        map_index * data->count
                                                  : NULL) &&
             failure == NULL) {
@@ -667,7 +678,7 @@ cleanup:
             if (maps[map_index] != NULL) bench_adapter.destroy(maps[map_index]);
         }
     }
-    free(lookup_results);
+    free(lookup_values);
     free(results);
     free(maps);
     if (failure != NULL) {
