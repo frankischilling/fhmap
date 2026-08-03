@@ -16,6 +16,10 @@ BENCH_COMPARE_CC := $(BENCH_COMPARE_BUILD)/cc
 BENCH_COMPARE_VERSTABLE := $(BENCH_COMPARE_BUILD)/verstable
 BENCH_COMPARE_KHASHL := $(BENCH_COMPARE_BUILD)/khashl
 BENCH_COMPARE_KHASH := $(BENCH_COMPARE_BUILD)/khash
+BENCH_COMPARE_KHASHL_FAULT_U64 := \
+	$(BENCH_COMPARE_BUILD)/khashl_init_fail_u64
+BENCH_COMPARE_KHASHL_FAULT_CSTR := \
+	$(BENCH_COMPARE_BUILD)/khashl_init_fail_cstr
 BENCH_COMPARE_PERMUTED := $(BENCH_COMPARE_BUILD)/fhmap_permuted_hits
 BENCH_COMPARE_FETCHER := bench/compare/fetch-competitors.sh
 BENCH_COMPARE_LOCK := bench/compare/competitors.lock
@@ -139,6 +143,36 @@ $(BENCH_COMPARE_KHASH): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
 		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
 		$(BENCH_ALLOC_SRC) bench/compare/adapters/khash_adapter.c -o $@
 
+$(BENCH_COMPARE_KHASHL_FAULT_U64): tests/test_khashl_init_fault.c \
+		$(BENCH_COMMON_SRC) $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/khashl_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/khashl/khashl.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror \
+		-DKHASHL_FAULT_KIND=BENCH_KEYS_U64 \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/khashl \
+		tests/test_khashl_init_fault.c $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/khashl_adapter.c \
+		-Wl,--wrap=bench_calloc -o $@
+
+$(BENCH_COMPARE_KHASHL_FAULT_CSTR): tests/test_khashl_init_fault.c \
+		$(BENCH_COMMON_SRC) $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/khashl_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/khashl/khashl.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror \
+		-DKHASHL_FAULT_KIND=BENCH_KEYS_CSTR \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/khashl \
+		tests/test_khashl_init_fault.c $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/khashl_adapter.c \
+		-Wl,--wrap=bench_calloc -o $@
+
 $(BENCH_COMPARE_PERMUTED): $(BENCH_COMPARE_SRC) \
 		bench/compare/common/bench_adapter.h \
 		bench/compare/common/bench_common.h \
@@ -158,6 +192,8 @@ bench-compare-smoke: bench-compare-lock $(BENCH_COMPARE_FHMAP) \
 		$(BENCH_COMPARE_VERSTABLE) \
 		$(BENCH_COMPARE_KHASHL) \
 		$(BENCH_COMPARE_KHASH) \
+		$(BENCH_COMPARE_KHASHL_FAULT_U64) \
+		$(BENCH_COMPARE_KHASHL_FAULT_CSTR) \
 		$(BENCH_COMPARE_PERMUTED)
 	sh tests/test_bench_compare.sh
 

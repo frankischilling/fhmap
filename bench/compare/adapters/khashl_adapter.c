@@ -115,10 +115,13 @@ static void *khashl_bench_create(bench_key_kind kind, size_t expected)
     map = (khashl_bench_map *)bench_malloc(sizeof(*map));
     if (map == NULL) return NULL;
     map->kind = kind;
-    if (kind == BENCH_KEYS_U64)
-        map->raw.u64 = khashl_u64_init();
-    else
-        map->raw.cstr = khashl_cstr_init();
+    if (kind == BENCH_KEYS_U64) {
+        map->raw.u64 = (khashl_u64_map *)khashl_bench_calloc_array(
+            1u, sizeof(*map->raw.u64));
+    } else {
+        map->raw.cstr = (khashl_cstr_map *)khashl_bench_calloc_array(
+            1u, sizeof(*map->raw.cstr));
+    }
     if ((kind == BENCH_KEYS_U64 && map->raw.u64 == NULL) ||
         (kind == BENCH_KEYS_CSTR && map->raw.cstr == NULL) ||
         (expected != 0u && !khashl_bench_reserve(map, expected))) {

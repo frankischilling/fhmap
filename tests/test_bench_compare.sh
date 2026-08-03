@@ -580,6 +580,29 @@ do
     '
 done
 
+expect_khashl_init_failure()
+{
+    fault_binary=$1
+    key_kind=$2
+    : >"$stdout_file"
+    : >"$stderr_file"
+    if "$fault_binary" >"$stdout_file" 2>"$stderr_file"; then
+        fault_status=0
+    else
+        fault_status=$?
+    fi
+    test "$fault_status" -eq 1
+    test ! -s "$stdout_file"
+    test "$(wc -l <"$stderr_file")" -eq 1
+    grep "^khashl: $key_kind/insert_reserved: map setup failed$" \
+        "$stderr_file" >/dev/null
+}
+
+expect_khashl_init_failure \
+    ./build/bench-compare/khashl_init_fail_u64 u64
+expect_khashl_init_failure \
+    ./build/bench-compare/khashl_init_fail_cstr cstr
+
 expect_bad_arguments()
 {
     : >"$stdout_file"
