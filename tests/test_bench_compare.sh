@@ -541,6 +541,45 @@ printf '%s\n' "$tiny_output" | awk -F '\t' '
     }
 '
 
+for adapter_name in cc verstable khashl khash
+do
+    adapter_binary=./build/bench-compare/$adapter_name
+    test -x "$adapter_binary"
+    adapter_output=$($adapter_binary --smoke --count 32 --samples 3)
+    printf '%s\n' "$adapter_output" | awk -F '\t' -v map="$adapter_name" '
+        BEGIN {
+            split("insert_reserved insert_growing update lookup_hit lookup_miss erase iterate", workloads, " ")
+        }
+        {
+            if (NF != 15 || $1 != "result" || $2 != map) exit 1
+            if ($3 != "u64" && $3 != "cstr") exit 1
+            if ($5 != "32" || $6 != "3" || $9 != "ok") exit 1
+            if ($7 !~ /^[0-9]+([.][0-9]+)?$/ ||
+                $8 !~ /^[0-9]+([.][0-9]+)?$/) exit 1
+            if (($7 + 0) <= 0 || ($8 + 0) < 0) exit 1
+            if ($10 !~ /^[0-9]+$/ || $10 == "") exit 1
+            for (i = 11; i <= 15; ++i) {
+                if ($i !~ /^[0-9]+$/) exit 1
+            }
+            known = 0
+            for (i = 1; i <= 7; ++i) {
+                if ($4 == workloads[i]) known = 1
+            }
+            if (!known) exit 1
+            seen[$3 SUBSEP $4]++
+        }
+        END {
+            if (NR != 14) exit 1
+            for (kind = 1; kind <= 2; ++kind) {
+                key_kind = kind == 1 ? "u64" : "cstr"
+                for (i = 1; i <= 7; ++i) {
+                    if (seen[key_kind SUBSEP workloads[i]] != 1) exit 1
+                }
+            }
+        }
+    '
+done
+
 expect_bad_arguments()
 {
     : >"$stdout_file"

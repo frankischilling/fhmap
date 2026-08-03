@@ -12,6 +12,10 @@ BENCH_COMPARE_SRC := $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
 	$(BENCH_ALLOC_SRC) $(BENCH_COMPARE_ADAPTER_SRC)
 BENCH_COMPARE_BUILD := $(BUILD)/bench-compare
 BENCH_COMPARE_FHMAP := $(BENCH_COMPARE_BUILD)/fhmap
+BENCH_COMPARE_CC := $(BENCH_COMPARE_BUILD)/cc
+BENCH_COMPARE_VERSTABLE := $(BENCH_COMPARE_BUILD)/verstable
+BENCH_COMPARE_KHASHL := $(BENCH_COMPARE_BUILD)/khashl
+BENCH_COMPARE_KHASH := $(BENCH_COMPARE_BUILD)/khash
 BENCH_COMPARE_PERMUTED := $(BENCH_COMPARE_BUILD)/fhmap_permuted_hits
 BENCH_COMPARE_FETCHER := bench/compare/fetch-competitors.sh
 BENCH_COMPARE_LOCK := bench/compare/competitors.lock
@@ -87,6 +91,54 @@ $(BENCH_COMPARE_FHMAP): $(BENCH_COMPARE_SRC) \
 	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native \
 		$(BENCH_COMPARE_SRC) -o $@
 
+$(BENCH_COMPARE_CC): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/cc_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/cc/cc.h | $(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/cc \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/cc_adapter.c -o $@
+
+$(BENCH_COMPARE_VERSTABLE): $(BENCH_COMPARE_DRIVER_SRC) \
+		$(BENCH_COMMON_SRC) $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/verstable_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/verstable/verstable.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/verstable \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/verstable_adapter.c -o $@
+
+$(BENCH_COMPARE_KHASHL): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/khashl_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/khashl/khashl.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/khashl \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/khashl_adapter.c -o $@
+
+$(BENCH_COMPARE_KHASH): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/khash_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/khash/khash.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/khash \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/khash_adapter.c -o $@
+
 $(BENCH_COMPARE_PERMUTED): $(BENCH_COMPARE_SRC) \
 		bench/compare/common/bench_adapter.h \
 		bench/compare/common/bench_common.h \
@@ -102,6 +154,10 @@ bench-compare-fetch: bench-compare-lock | $(BUILD)
 	sh $(BENCH_COMPARE_FETCHER) --dest $(BENCH_COMPARE_COMPETITORS)
 
 bench-compare-smoke: bench-compare-lock $(BENCH_COMPARE_FHMAP) \
+		$(BENCH_COMPARE_CC) \
+		$(BENCH_COMPARE_VERSTABLE) \
+		$(BENCH_COMPARE_KHASHL) \
+		$(BENCH_COMPARE_KHASH) \
 		$(BENCH_COMPARE_PERMUTED)
 	sh tests/test_bench_compare.sh
 
