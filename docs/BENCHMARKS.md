@@ -220,13 +220,40 @@ the untimed passes, 10-millisecond sample calibration, nine repeated samples,
 and median/MAD reporting reduce common sources of noise, but they do not remove
 host load, frequency scaling, kernel, compiler, or microarchitecture effects.
 
-The reference file was produced with this command from commit
-`623d9a2f1570cd8a80c4a4dfbb762c94f1cbd353` on branch
-`perf/issue-1-benchmark-suite`:
+Use a separate checkout to reproduce the reference report without moving the
+branch in your working repository. The checkout below starts from `main`, then
+creates the recorded branch at commit
+`623d9a2f1570cd8a80c4a4dfbb762c94f1cbd353`. The destination must not already
+exist.
 
 ```sh
-FHMAP_BENCH_COUNTS=32,4096,262144,1048576 FHMAP_BENCH_SAMPLES=9 ./bench/compare/run-comparison.sh
+source_repo=$(git rev-parse --show-toplevel)
+baseline_checkout=../fhmap-benchmark-baseline
+git clone --no-local --branch main "$source_repo" "$baseline_checkout"
+cd "$baseline_checkout"
+git switch -c perf/issue-1-benchmark-suite \
+  623d9a2f1570cd8a80c4a4dfbb762c94f1cbd353
+
+baseline_cflags='-std=c11 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -O3 -DNDEBUG -march=native'
+make CC=cc BENCH_COMPARE_CFLAGS="$baseline_cflags" bench-compare-fetch
+make CC=cc BENCH_COMPARE_CFLAGS="$baseline_cflags" bench-compare-build
+mkdir -p bench/results
+FHMAP_BENCH_COUNTS=32,4096,262144,1048576 \
+FHMAP_BENCH_SAMPLES=9 \
+FHMAP_BENCH_SEED=7640891576956012809 \
+FHMAP_BENCH_CPU=0 \
+FHMAP_BENCH_CC=cc \
+FHMAP_BENCH_CFLAGS="$baseline_cflags" \
+  ./bench/compare/run-comparison.sh \
+  > bench/results/2026-08-02-i9-10900f-gcc13-baseline.tsv
 ```
+
+Matching the recorded host metadata also requires the CPU, kernel, and compiler
+listed below. CPU 0 must be available to `taskset`. The compiler command is
+`cc`, and the first line from `cc --version` must be
+`cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`. The commands set the recorded
+flags, seed, and CPU explicitly. A different host or toolchain produces a valid
+report with different metadata and timing values.
 
 ## Pre-optimization baseline
 
@@ -241,7 +268,9 @@ The report records:
 - `Linux DESKTOP-CJL9TT2 6.6.87.2-microsoft-standard-WSL2 #1 SMP
   PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025 x86_64 x86_64 x86_64
   GNU/Linux`;
-- `cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`;
+- compiler metadata
+  `cc cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`, formed from command `cc`
+  and version line `cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`;
 - `-std=c11 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -O3 -DNDEBUG
   -march=native`;
 - counts `32,4096,262144,1048576`, 9 samples, seed
@@ -279,8 +308,7 @@ of eleven at `26.108846` million operations per second:
 | 10 | tidwall | 17.025416 |
 | 11 | uthash | 12.893230 |
 
-This is the untouched pre-optimization baseline for the combined insertion
-probe experiment in Task 10 and the hot API inlining experiment in Task 11. It
-does not show that one map is fastest for every workload. The per-scenario rows
-are the relevant comparison when an application's key type, size, and
-operation mix are known.
+This is the untouched pre-optimization baseline captured before the combined
+insertion-probe and hot API inlining experiments. It does not show that one map
+is fastest for every workload. The per-scenario rows are the relevant
+comparison when an application's key type, size, and operation mix are known.
