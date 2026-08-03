@@ -5,10 +5,23 @@
 #include <stdint.h>
 #include <string.h>
 
+static void assert_stats_equal(bench_alloc_stats actual,
+                               bench_alloc_stats expected)
+{
+    assert(actual.current_bytes == expected.current_bytes);
+    assert(actual.peak_bytes == expected.peak_bytes);
+    assert(actual.allocations == expected.allocations);
+    assert(actual.frees == expected.frees);
+}
+
 static void test_cstr_content_and_lifetime(void)
 {
+    char retained_key[] = "retained-borrowed-key";
     char stored_key[] = "equal-content-key";
     char lookup_key[] = "equal-content-key";
+    bench_alloc_stats before_insert;
+    bench_alloc_stats after_insert;
+    bench_alloc_stats before_update;
     bench_alloc_stats ended;
     bool inserted = false;
     uint64_t value = 0;
@@ -23,24 +36,37 @@ static void test_cstr_content_and_lifetime(void)
     assert(bench_adapter.reserve(map, 32u));
     capacity = bench_adapter.capacity(map);
     assert(capacity == 0u || capacity >= 32u);
+    assert(bench_adapter.put_cstr(map, retained_key, UINT64_C(17),
+                                  &inserted));
+    assert(inserted);
+    before_insert = bench_alloc_snapshot();
     assert(bench_adapter.put_cstr(map, stored_key, UINT64_C(41), &inserted));
     assert(inserted);
+    after_insert = bench_alloc_snapshot();
+    assert_stats_equal(after_insert, before_insert);
     assert(bench_adapter.get_cstr(map, lookup_key, &value));
     assert(value == UINT64_C(41));
+    before_update = bench_alloc_snapshot();
     assert(bench_adapter.put_cstr(map, lookup_key, UINT64_C(42), &inserted));
     assert(!inserted);
-    assert(bench_adapter.size(map) == 1u);
+    assert_stats_equal(bench_alloc_snapshot(), before_update);
+    assert(bench_adapter.size(map) == 2u);
     assert(bench_adapter.get_cstr(map, stored_key, &value));
     assert(value == UINT64_C(42));
+#ifdef STC_TYPED_ADAPTER_TEST
+    assert(bench_adapter.capacity(map) == 64u);
+#endif
     assert(bench_adapter.reserve(map, 1u));
     assert(bench_adapter.capacity(map) == capacity);
     assert(bench_adapter.reserve(map, 32u));
     assert(bench_adapter.capacity(map) == capacity);
     assert(!bench_adapter.reserve(map, SIZE_MAX));
     assert(bench_adapter.remove_cstr(map, lookup_key));
+    assert(bench_adapter.size(map) == 1u);
+    bench_adapter.destroy(map);
+    assert(strcmp(retained_key, "retained-borrowed-key") == 0);
     assert(strcmp(stored_key, "equal-content-key") == 0);
     assert(strcmp(lookup_key, "equal-content-key") == 0);
-    bench_adapter.destroy(map);
     ended = bench_alloc_end();
     assert(ended.current_bytes == 0u);
     assert(ended.allocations != 0u);
@@ -62,6 +88,9 @@ static void test_u64_contract(void)
     assert(!inserted);
     assert(bench_adapter.get_u64(map, UINT64_C(2), &value));
     assert(value == UINT64_C(9));
+#ifdef STC_TYPED_ADAPTER_TEST
+    assert(bench_adapter.capacity(map) == 32u);
+#endif
     assert(bench_adapter.remove_u64(map, UINT64_C(2)));
     assert(!bench_adapter.get_u64(map, UINT64_C(2), &value));
     assert(bench_adapter.size(map) == 0u);

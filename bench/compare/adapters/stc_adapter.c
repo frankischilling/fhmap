@@ -260,17 +260,19 @@ static size_t stc_bench_size(const void *raw_map)
 
 static size_t stc_bench_capacity(const void *raw_map)
 {
-    const stc_bench_map *map = stc_bench_cast_const(raw_map);
-    isize_t capacity;
+    stc_bench_map *map = stc_bench_cast((void *)raw_map);
+    isize_t bucket_count;
 
     if (map == NULL) return 0u;
     if (map->kind == BENCH_KEYS_U64)
-        capacity = stc_u64_map_capacity(&map->raw.u64);
+        bucket_count = stc_u64_map_bucket_count(&map->raw.u64);
     else if (map->kind == BENCH_KEYS_CSTR)
-        capacity = stc_cstr_map_capacity(&map->raw.cstr);
+        bucket_count = stc_cstr_map_bucket_count(&map->raw.cstr);
     else
         return 0u;
-    return capacity < 0 ? 0u : (size_t)capacity;
+    if (bucket_count <= 0 || (uintmax_t)bucket_count > (uintmax_t)SIZE_MAX)
+        return 0u;
+    return (size_t)bucket_count;
 }
 
 static void stc_bench_destroy(void *raw_map)

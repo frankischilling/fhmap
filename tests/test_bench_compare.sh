@@ -21,6 +21,32 @@ cleanup()
 }
 trap cleanup EXIT HUP INT TERM
 
+typed_matrix_plan=$fetch_test_dir/typed-matrix-plan
+make -B -n clang-test sanitize >"$typed_matrix_plan"
+for expected_binary in \
+    mlib_clang stc_clang stb_ds_clang \
+    test_mlib_adapter_clang test_stc_adapter_clang \
+    test_stb_ds_adapter_clang \
+    mlib_sanitize stc_sanitize stb_ds_sanitize \
+    test_mlib_adapter_sanitize test_stc_adapter_sanitize \
+    test_stb_ds_adapter_sanitize
+do
+    grep "build/bench-compare/$expected_binary" "$typed_matrix_plan" \
+        >/dev/null
+done
+
+missing_matrix_plan=$fetch_test_dir/missing-typed-matrix-plan
+make -B -n \
+    BENCH_COMPARE_COMPETITORS="$fetch_test_dir/not-fetched" \
+    clang-test sanitize >"$missing_matrix_plan"
+test "$(grep -c 'typed competitor sources are absent; skipping' \
+    "$missing_matrix_plan")" -eq 2
+if grep -E 'build/bench-compare/(test_)?(mlib|stc|stb_ds).*_(clang|sanitize)' \
+        "$missing_matrix_plan" >/dev/null; then
+    printf 'typed adapter matrix was planned without competitor sources\n' >&2
+    exit 1
+fi
+
 expect_command_failure()
 {
     : >"$stdout_file"
