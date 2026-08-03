@@ -92,19 +92,25 @@ static bool khashl_bench_reserve(void *raw_map, size_t expected)
 {
     khashl_bench_map *map = khashl_bench_cast(raw_map);
     khint_t requested;
+    size_t capacity;
 
-    if (map == NULL || !khashl_bench_bucket_request(expected, &requested))
+    if (map == NULL) return false;
+    if (map->kind == BENCH_KEYS_U64 && map->raw.u64 != NULL) {
+        capacity = (size_t)kh_capacity(map->raw.u64);
+    } else if (map->kind == BENCH_KEYS_CSTR && map->raw.cstr != NULL) {
+        capacity = (size_t)kh_capacity(map->raw.cstr);
+    } else {
         return false;
-    if (expected == 0u) return true;
+    }
+    if ((size_t)kh_max_count(capacity) >= expected) return true;
+    if (!khashl_bench_bucket_request(expected, &requested)) return false;
+    if ((size_t)requested < capacity) requested = (khint_t)capacity;
     if (map->kind == BENCH_KEYS_U64) {
         khashl_u64_resize(map->raw.u64, requested);
         return (size_t)kh_max_count(kh_capacity(map->raw.u64)) >= expected;
     }
-    if (map->kind == BENCH_KEYS_CSTR) {
-        khashl_cstr_resize(map->raw.cstr, requested);
-        return (size_t)kh_max_count(kh_capacity(map->raw.cstr)) >= expected;
-    }
-    return false;
+    khashl_cstr_resize(map->raw.cstr, requested);
+    return (size_t)kh_max_count(kh_capacity(map->raw.cstr)) >= expected;
 }
 
 static void *khashl_bench_create(bench_key_kind kind, size_t expected)

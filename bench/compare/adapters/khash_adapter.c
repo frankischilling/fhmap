@@ -85,16 +85,19 @@ static bool khash_bench_reserve(void *raw_map, size_t expected)
     size_t size;
     size_t occupied;
     size_t upper_bound;
+    khint_t current_buckets;
 
     if (map == NULL) return false;
     if (map->kind == BENCH_KEYS_U64 && map->raw.u64 != NULL) {
         size = (size_t)map->raw.u64->size;
         occupied = (size_t)map->raw.u64->n_occupied;
         upper_bound = (size_t)map->raw.u64->upper_bound;
+        current_buckets = map->raw.u64->n_buckets;
     } else if (map->kind == BENCH_KEYS_CSTR && map->raw.cstr != NULL) {
         size = (size_t)map->raw.cstr->size;
         occupied = (size_t)map->raw.cstr->n_occupied;
         upper_bound = (size_t)map->raw.cstr->upper_bound;
+        current_buckets = map->raw.cstr->n_buckets;
     } else {
         return false;
     }
@@ -103,7 +106,12 @@ static bool khash_bench_reserve(void *raw_map, size_t expected)
          expected - size <= upper_bound - occupied)) {
         return true;
     }
-    if (!khash_bench_bucket_request(expected, &requested)) return false;
+    if (expected <= upper_bound) {
+        requested = current_buckets;
+    } else {
+        if (!khash_bench_bucket_request(expected, &requested)) return false;
+        if (requested < current_buckets) requested = current_buckets;
+    }
     if (map->kind == BENCH_KEYS_U64)
         return kh_resize(khash_u64, map->raw.u64, requested) == 0;
     return kh_resize(khash_cstr, map->raw.cstr, requested) == 0;
