@@ -177,6 +177,9 @@ make test          # optimized GCC test run
 make clang-test    # test with Clang when installed
 make sanitize      # ASan + UBSan test run
 make bench         # compile and run the benchmark
+make bench-compare-fetch  # fetch pinned comparison sources
+make bench-compare-smoke  # verify adapters and report handling
+make bench-compare        # run the full comparison suite
 ```
 
 Pass an element count to the benchmark executable for a different workload:
@@ -188,6 +191,9 @@ Pass an element count to the benchmark executable for a different workload:
 The benchmark prints insert, successful lookup, failed lookup, iteration, and
 erase throughput plus table allocation size. CPU, compiler, flags, key
 distribution, and load factor can change results substantially.
+
+See the [benchmark comparison guide](docs/BENCHMARKS.md) for the pinned
+competitors, workload definitions, report format, and reference baseline.
 
 ## Configuration
 
@@ -207,8 +213,8 @@ for ordinary byte access; `fhmap` performs its own in-block alignment.
 
 ## Documentation
 
-- [`docs/API.md`](docs/API.md) — complete public API and return contracts
-- [`docs/DESIGN.md`](docs/DESIGN.md) — table layout, lookup path, deletion, and
+- [`docs/API.md`](docs/API.md): complete public API and return contracts
+- [`docs/DESIGN.md`](docs/DESIGN.md): table layout, lookup path, deletion, and
   performance tradeoffs
 
 ## License
