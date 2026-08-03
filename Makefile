@@ -54,10 +54,54 @@ BENCH_COMPARE_UTHASH_HEADERS := \
 BENCH_COMPARE_TIDWALL_SOURCES := \
 	$(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.h \
 	$(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.c
+BENCH_COMPARE_POTTERY_INCLUDE := \
+	$(BENCH_COMPARE_COMPETITORS)/pottery/include/pottery
 BENCH_COMPARE_POTTERY_HEADERS := \
-	$(BENCH_COMPARE_COMPETITORS)/pottery/include/pottery/pottery_dependencies.h \
-	$(BENCH_COMPARE_COMPETITORS)/pottery/include/pottery/open_hash_map/pottery_open_hash_map_static.t.h \
-	$(BENCH_COMPARE_COMPETITORS)/pottery/include/pottery/open_hash_map/impl/pottery_open_hash_map_definitions.t.h
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/pottery_dependencies.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/platform/pottery_platform_headers.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/platform/pottery_platform_features.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/platform/pottery_platform_attributes.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/platform/pottery_platform_functions.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/platform/pottery_platform_pragma_push.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/platform/pottery_platform_pragma_pop.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_map/pottery_open_hash_map_static.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_map/impl/pottery_open_hash_map_config_types.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/container_types/pottery_container_types_static.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/container_types/impl/pottery_container_types_macros.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/container_types/impl/pottery_container_types_declarations.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/container_types/impl/pottery_container_types_unmacros.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_map/impl/pottery_open_hash_map_config_lifecycle.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/lifecycle/pottery_lifecycle_static.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/lifecycle/impl/pottery_lifecycle_macros.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/lifecycle/impl/pottery_lifecycle_declarations.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/lifecycle/impl/pottery_lifecycle_unmacros.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_map/impl/pottery_open_hash_map_macros.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_map/impl/pottery_open_hash_map_forward.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/lifecycle/pottery_lifecycle_cleanup.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/container_types/pottery_container_types_cleanup.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_map/impl/pottery_open_hash_map_config_table.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_table/pottery_open_hash_table_static.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_table/impl/pottery_open_hash_table_config_types.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_table/impl/pottery_open_hash_table_config_lifecycle.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_table/impl/pottery_open_hash_table_config_array_access.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/array_access/pottery_array_access_static.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/array_access/impl/pottery_array_access_macros.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/array_access/impl/pottery_array_access_declarations.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/array_access/impl/pottery_array_access_unmacros.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_table/impl/pottery_open_hash_table_macros.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_table/impl/pottery_open_hash_table_declarations.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_table/impl/pottery_open_hash_table_definitions.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/array_access/pottery_array_access_cleanup.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_table/impl/pottery_open_hash_table_unmacros.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_map/impl/pottery_open_hash_map_config_alloc.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/alloc/pottery_alloc_static.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/alloc/impl/pottery_alloc_macros.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/alloc/impl/pottery_alloc_declarations.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/alloc/impl/pottery_alloc_definitions.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/alloc/impl/pottery_alloc_unmacros.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_map/impl/pottery_open_hash_map_declarations.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_map/impl/pottery_open_hash_map_definitions.t.h \
+	$(BENCH_COMPARE_POTTERY_INCLUDE)/open_hash_map/impl/pottery_open_hash_map_unmacros.t.h
 BENCH_COMPARE_TYPED_COMMON_DEPS := $(BENCH_COMPARE_DRIVER_SRC) \
 	$(BENCH_COMMON_SRC) $(BENCH_ALLOC_SRC) \
 	bench/compare/common/bench_adapter.h \
@@ -386,7 +430,7 @@ $(BENCH_COMPARE_TIDWALL_OBJ): \
 		$(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.c \
 		$(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.h | \
 		$(BENCH_COMPARE_BUILD)
-	$(CC) -std=c11 -Wall -Wextra -Wpedantic -O3 -DNDEBUG \
+	$(CC) -std=c11 -Wall -Wextra -Wpedantic -O3 -DNDEBUG -march=native \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
 		-c $(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.c -o $@
 
@@ -423,7 +467,7 @@ $(BENCH_COMPARE_POTTERY): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
 		bench/compare/common/bench_adapter.h \
 		bench/compare/common/bench_common.h \
 		bench/compare/common/bench_alloc.h \
-		$(BENCH_COMPARE_COMPETITORS)/pottery/include/pottery/open_hash_map/pottery_open_hash_map_static.t.h | \
+		$(BENCH_COMPARE_POTTERY_HEADERS) | \
 		$(BENCH_COMPARE_BUILD)
 	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native -Werror \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/pottery/include \
@@ -434,7 +478,7 @@ $(BENCH_COMPARE_POTTERY_TEST): tests/test_pottery_adapter.c \
 		$(BENCH_ALLOC_SRC) bench/compare/adapters/pottery_adapter.c \
 		bench/compare/common/bench_adapter.h \
 		bench/compare/common/bench_alloc.h \
-		$(BENCH_COMPARE_COMPETITORS)/pottery/include/pottery/open_hash_map/pottery_open_hash_map_static.t.h | \
+		$(BENCH_COMPARE_POTTERY_HEADERS) | \
 		$(BENCH_COMPARE_BUILD)
 	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/pottery/include \
@@ -551,7 +595,7 @@ $(BENCH_COMPARE_UTHASH_CLANG): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
 
 $(BENCH_COMPARE_TIDWALL_OBJ_CLANG): $(BENCH_COMPARE_TIDWALL_SOURCES) | \
 		$(BENCH_COMPARE_BUILD)
-	clang -std=c11 -Wall -Wextra -Wpedantic -O3 -DNDEBUG \
+	clang -std=c11 -Wall -Wextra -Wpedantic -O3 -DNDEBUG -march=native \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
 		-c $(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.c -o $@
 

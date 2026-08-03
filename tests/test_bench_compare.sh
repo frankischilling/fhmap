@@ -12,6 +12,18 @@ stdout_file=$fetch_test_dir/stdout
 stderr_file=$fetch_test_dir/stderr
 names='cc verstable khashl khash mlib stc stb_ds uthash tidwall pottery'
 
+test "$(grep -c '^#define POTTERY_OPEN_HASH_MAP_ALLOC_MALLOC bench_malloc$' \
+    bench/compare/adapters/pottery_adapter.c)" -eq 2
+test "$(grep -c '^#define POTTERY_OPEN_HASH_MAP_ALLOC_ZALLOC pottery_bench_zalloc$' \
+    bench/compare/adapters/pottery_adapter.c)" -eq 2
+test "$(grep -c '^#define POTTERY_OPEN_HASH_MAP_ALLOC_FREE bench_free$' \
+    bench/compare/adapters/pottery_adapter.c)" -eq 2
+if grep '^#define POTTERY_OPEN_HASH_MAP_ALLOC_REALLOC' \
+        bench/compare/adapters/pottery_adapter.c >/dev/null; then
+    printf 'Pottery adapter configured an incompatible realloc callback\n' >&2
+    exit 1
+fi
+
 cleanup()
 {
     case $fetch_test_dir in
@@ -43,6 +55,27 @@ do
         >/dev/null
 done
 
+tidwall_native_plan=$fetch_test_dir/tidwall-native-plan
+tidwall_native_joined=$fetch_test_dir/tidwall-native-joined
+make -B -n build/bench-compare/tidwall_hashmap.o \
+    build/bench-compare/tidwall_hashmap_clang.o >"$tidwall_native_plan"
+awk '
+    {
+        command = command $0
+        if (sub(/\\$/, "", command)) {
+            command = command " "
+            next
+        }
+        print command
+        command = ""
+    }
+    END { if (command != "") print command }
+' "$tidwall_native_plan" >"$tidwall_native_joined"
+grep -E '^cc .* -march=native.*[[:space:]]-c[[:space:]].*tidwall/hashmap[.]c -o .*tidwall_hashmap[.]o$' \
+    "$tidwall_native_joined" >/dev/null
+grep -E '^clang .* -march=native.*[[:space:]]-c[[:space:]].*tidwall/hashmap[.]c -o .*tidwall_hashmap_clang[.]o$' \
+    "$tidwall_native_joined" >/dev/null
+
 missing_matrix_plan=$fetch_test_dir/missing-typed-matrix-plan
 make -B -n \
     BENCH_COMPARE_COMPETITORS="$fetch_test_dir/not-fetched" \
@@ -57,8 +90,11 @@ fi
 
 partial_sources=$fetch_test_dir/partial-sources
 partial_matrix_plan=$fetch_test_dir/partial-matrix-plan
-mkdir -p "$partial_sources/uthash/src"
-: >"$partial_sources/uthash/src/uthash.h"
+partial_build=$fetch_test_dir/partial-build
+missing_pottery_header=$partial_sources/pottery/include/pottery/open_hash_table/impl/pottery_open_hash_table_definitions.t.h
+mkdir -p "$partial_sources/pottery" "$partial_build/bench-compare"
+cp -R build/competitors/pottery/include "$partial_sources/pottery/include"
+rm "$missing_pottery_header"
 make -B -n BENCH_COMPARE_COMPETITORS="$partial_sources" \
     clang-test sanitize >"$partial_matrix_plan"
 test "$(grep -c 'typed competitor sources are absent; skipping' \
@@ -68,6 +104,20 @@ if grep -E 'build/bench-compare/(test_)?(mlib|stc|stb_ds|uthash|tidwall|pottery)
     printf 'typed adapter matrix was planned with partial sources\n' >&2
     exit 1
 fi
+for stale_target in pottery test_pottery_adapter
+do
+    : >"$partial_build/bench-compare/$stale_target"
+    if make -n BUILD="$partial_build" \
+            BENCH_COMPARE_COMPETITORS="$partial_sources" \
+            "$partial_build/bench-compare/$stale_target" \
+            >"$stdout_file" 2>"$stderr_file"; then
+        printf 'stale Pottery target passed with a missing dependency: %s\n' \
+            "$stale_target" >&2
+        exit 1
+    fi
+    grep "No rule to make target.*$missing_pottery_header" \
+        "$stderr_file" >/dev/null
+done
 
 expect_command_failure()
 {

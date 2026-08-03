@@ -49,7 +49,6 @@ static void *pottery_bench_zalloc(size_t size)
 #define POTTERY_OPEN_HASH_MAP_LIFECYCLE_BY_VALUE 1
 #define POTTERY_OPEN_HASH_MAP_ALLOC_MALLOC bench_malloc
 #define POTTERY_OPEN_HASH_MAP_ALLOC_ZALLOC pottery_bench_zalloc
-#define POTTERY_OPEN_HASH_MAP_ALLOC_REALLOC bench_realloc
 #define POTTERY_OPEN_HASH_MAP_ALLOC_FREE bench_free
 #define pottery_ohm_entry_destroy pottery_u64_bench_entry_destroy_internal
 #include "pottery/open_hash_map/pottery_open_hash_map_static.t.h"
@@ -65,7 +64,6 @@ static void *pottery_bench_zalloc(size_t size)
 #define POTTERY_OPEN_HASH_MAP_LIFECYCLE_BY_VALUE 1
 #define POTTERY_OPEN_HASH_MAP_ALLOC_MALLOC bench_malloc
 #define POTTERY_OPEN_HASH_MAP_ALLOC_ZALLOC pottery_bench_zalloc
-#define POTTERY_OPEN_HASH_MAP_ALLOC_REALLOC bench_realloc
 #define POTTERY_OPEN_HASH_MAP_ALLOC_FREE bench_free
 #define pottery_ohm_entry_destroy pottery_cstr_bench_entry_destroy_internal
 #include "pottery/open_hash_map/pottery_open_hash_map_static.t.h"
