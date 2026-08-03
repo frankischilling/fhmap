@@ -124,6 +124,26 @@ awk '
     END { if (tests != 6 || production != 6) exit 1 }
 ' "$adapter_hook_joined"
 
+x87_probe=$fetch_test_dir/x87-probe.o
+if printf '%s\n' 'int fhmap_x87_probe;' | \
+        cc -std=c11 -mfpmath=387 -fexcess-precision=standard \
+            -x c -c -o "$x87_probe" - >/dev/null 2>&1; then
+    x87_tidwall_object=$fetch_test_dir/tidwall-hashmap-x87.o
+    x87_tidwall_test=$fetch_test_dir/test-tidwall-x87
+    cc -std=c11 -Wall -Wextra -Wpedantic -O1 -g \
+        -mfpmath=387 -fexcess-precision=standard \
+        -isystem build/competitors/tidwall \
+        -c build/competitors/tidwall/hashmap.c -o "$x87_tidwall_object"
+    cc -std=c11 -Wall -Wextra -Wpedantic -Wconversion -Wshadow \
+        -O1 -g -Werror -mfpmath=387 -fexcess-precision=standard \
+        -DFHMAP_BENCH_ADAPTER_TESTING \
+        -isystem build/competitors/tidwall \
+        tests/test_tidwall_adapter.c bench/compare/common/bench_alloc.c \
+        bench/compare/adapters/tidwall_adapter.c "$x87_tidwall_object" \
+        -Wl,--wrap=bench_malloc -o "$x87_tidwall_test"
+    "$x87_tidwall_test"
+fi
+
 missing_matrix_plan=$fetch_test_dir/missing-typed-matrix-plan
 make -B -n \
     BENCH_COMPARE_COMPETITORS="$fetch_test_dir/not-fetched" \

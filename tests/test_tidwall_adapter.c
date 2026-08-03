@@ -2,6 +2,7 @@
 #include "../bench/compare/common/bench_alloc.h"
 
 #include <assert.h>
+#include <float.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,17 +30,21 @@ static void assert_stats_equal(bench_alloc_stats actual,
     assert(actual.frees == expected.frees);
 }
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
 static size_t pinned_threshold_reference(size_t buckets)
 {
-    const double scaled = (double)buckets * (60u / 100.0);
-
-    assert(scaled >= 0.0);
-    assert(scaled < (double)buckets);
-    return (size_t)scaled;
+    return (size_t)(buckets * (60u / 100.0));
 }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 static void test_threshold_matches_pinned_expression(void)
 {
+#if FLT_EVAL_METHOD == 0
     static const struct threshold_vector {
         uint64_t buckets;
         uint64_t threshold;
@@ -53,11 +58,28 @@ static void test_threshold_matches_pinned_expression(void)
         {UINT64_C(576460752303423488), UINT64_C(345876451382054080)},
         {UINT64_C(1152921504606846976), UINT64_C(691752902764108160)}
     };
+#elif FLT_EVAL_METHOD == 2
+    static const struct threshold_vector {
+        uint64_t buckets;
+        uint64_t threshold;
+    } vectors[] = {
+        {UINT64_C(9007199254740992), UINT64_C(5404319552844595)},
+        {UINT64_C(18014398509481984), UINT64_C(10808639105689190)},
+        {UINT64_C(36028797018963968), UINT64_C(21617278211378380)},
+        {UINT64_C(72057594037927936), UINT64_C(43234556422756761)},
+        {UINT64_C(144115188075855872), UINT64_C(86469112845513523)},
+        {UINT64_C(288230376151711744), UINT64_C(172938225691027046)},
+        {UINT64_C(576460752303423488), UINT64_C(345876451382054092)},
+        {UINT64_C(1152921504606846976), UINT64_C(691752902764108185)}
+    };
+#endif
     bench_alloc_stats before;
     bench_alloc_stats ended;
     size_t actual;
     size_t buckets;
+#if FLT_EVAL_METHOD == 0 || FLT_EVAL_METHOD == 2
     size_t index;
+#endif
 
     bench_alloc_reset();
     bench_alloc_begin();
@@ -69,6 +91,7 @@ static void test_threshold_matches_pinned_expression(void)
         if (buckets > SIZE_MAX / 2u) break;
         buckets *= 2u;
     }
+#if FLT_EVAL_METHOD == 0 || FLT_EVAL_METHOD == 2
     if (sizeof(size_t) >= sizeof(uint64_t)) {
         for (index = 0u; index < sizeof(vectors) / sizeof(vectors[0]);
              ++index) {
@@ -77,6 +100,7 @@ static void test_threshold_matches_pinned_expression(void)
             assert(actual == (size_t)vectors[index].threshold);
         }
     }
+#endif
     assert_stats_equal(bench_alloc_snapshot(), before);
     ended = bench_alloc_end();
     assert(ended.current_bytes == 0u);

@@ -74,19 +74,22 @@ static int tidwall_cstr_compare(const void *left, const void *right,
     return strcmp(a->key, b->key);
 }
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
 static bool tidwall_entry_threshold(size_t buckets, size_t *threshold)
 {
-    double scaled;
-
     if (threshold == NULL || buckets == 0u ||
         (buckets & (buckets - 1u)) != 0u) {
         return false;
     }
-    scaled = (double)buckets * (60u / 100.0);
-    if (!(scaled >= 0.0) || !(scaled < (double)buckets)) return false;
-    *threshold = (size_t)scaled;
+    *threshold = (size_t)(buckets * (60u / 100.0));
     return true;
 }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 #ifdef FHMAP_BENCH_ADAPTER_TESTING
 bool tidwall_bench_test_entry_threshold(size_t buckets, size_t *threshold)
