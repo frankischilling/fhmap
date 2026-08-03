@@ -481,6 +481,7 @@ $(BENCH_COMPARE_POTTERY_TEST): tests/test_pottery_adapter.c \
 		$(BENCH_COMPARE_POTTERY_HEADERS) | \
 		$(BENCH_COMPARE_BUILD)
 	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror \
+		-DFHMAP_BENCH_ADAPTER_TESTING \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/pottery/include \
 		tests/test_pottery_adapter.c $(BENCH_ALLOC_SRC) \
 		bench/compare/adapters/pottery_adapter.c \
@@ -640,6 +641,7 @@ $(BENCH_COMPARE_POTTERY_TEST_CLANG): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
 		tests/test_pottery_adapter.c bench/compare/adapters/pottery_adapter.c \
 		$(BENCH_COMPARE_POTTERY_HEADERS) | $(BENCH_COMPARE_BUILD)
 	clang $(CFLAGS_COMMON) -O1 -g -Werror \
+		-DFHMAP_BENCH_ADAPTER_TESTING \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/pottery/include \
 		tests/test_pottery_adapter.c $(BENCH_ALLOC_SRC) \
 		bench/compare/adapters/pottery_adapter.c \
@@ -775,6 +777,7 @@ $(BENCH_COMPARE_POTTERY_TEST_SANITIZE): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
 		$(BENCH_COMPARE_POTTERY_HEADERS) | $(BENCH_COMPARE_BUILD)
 	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror -fno-omit-frame-pointer \
 		-fsanitize=address,undefined \
+		-DFHMAP_BENCH_ADAPTER_TESTING \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/pottery/include \
 		tests/test_pottery_adapter.c $(BENCH_ALLOC_SRC) \
 		bench/compare/adapters/pottery_adapter.c \

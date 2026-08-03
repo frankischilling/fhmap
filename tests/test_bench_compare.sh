@@ -23,6 +23,13 @@ if grep '^#define POTTERY_OPEN_HASH_MAP_ALLOC_REALLOC' \
     printf 'Pottery adapter configured an incompatible realloc callback\n' >&2
     exit 1
 fi
+test "$(grep -c '^#define POTTERY_OPEN_HASH_MAP_KEY_HASH pottery_u64_hash$' \
+    bench/compare/adapters/pottery_adapter.c)" -eq 1
+if grep 'pottery_knuth_hash_u64' bench/compare/adapters/pottery_adapter.c \
+        >/dev/null; then
+    printf 'Pottery u64 adapter applies an extra range hash\n' >&2
+    exit 1
+fi
 
 cleanup()
 {
@@ -75,6 +82,41 @@ grep -E '^cc .* -march=native.*[[:space:]]-c[[:space:]].*tidwall/hashmap[.]c -o 
     "$tidwall_native_joined" >/dev/null
 grep -E '^clang .* -march=native.*[[:space:]]-c[[:space:]].*tidwall/hashmap[.]c -o .*tidwall_hashmap_clang[.]o$' \
     "$tidwall_native_joined" >/dev/null
+
+pottery_hook_plan=$fetch_test_dir/pottery-hook-plan
+pottery_hook_joined=$fetch_test_dir/pottery-hook-joined
+make -B -n \
+    build/bench-compare/pottery \
+    build/bench-compare/test_pottery_adapter \
+    build/bench-compare/pottery_clang \
+    build/bench-compare/test_pottery_adapter_clang \
+    build/bench-compare/pottery_sanitize \
+    build/bench-compare/test_pottery_adapter_sanitize \
+    >"$pottery_hook_plan"
+awk '
+    {
+        command = command $0
+        if (sub(/\\$/, "", command)) {
+            command = command " "
+            next
+        }
+        print command
+        command = ""
+    }
+    END { if (command != "") print command }
+' "$pottery_hook_plan" >"$pottery_hook_joined"
+awk '
+    / -o .*\/test_pottery_adapter(_clang|_sanitize)?$/ {
+        tests++
+        if (index($0, "-DFHMAP_BENCH_ADAPTER_TESTING") == 0) exit 1
+        next
+    }
+    / -o .*\/pottery(_clang|_sanitize)?$/ {
+        production++
+        if (index($0, "-DFHMAP_BENCH_ADAPTER_TESTING") != 0) exit 1
+    }
+    END { if (tests != 3 || production != 3) exit 1 }
+' "$pottery_hook_joined"
 
 missing_matrix_plan=$fetch_test_dir/missing-typed-matrix-plan
 make -B -n \
@@ -682,6 +724,9 @@ check_adapter_output()
 boundary_output=$($binary --smoke --count 11 --samples 1)
 printf '%s\n' "$boundary_output" |
     check_adapter_output fhmap 11 1
+large_output=$($binary --smoke --count 4096 --samples 1)
+printf '%s\n' "$large_output" |
+    check_adapter_output fhmap 4096 1
 
 pottery_boundary_output=
 for adapter_name in cc verstable khashl khash mlib stc stb_ds uthash tidwall pottery
@@ -691,6 +736,16 @@ do
     adapter_output=$($adapter_binary --smoke --count 32 --samples 3)
     printf '%s\n' "$adapter_output" |
         check_adapter_output "$adapter_name" 32 3
+    if test "$adapter_name" = tidwall; then
+        printf '%s\n' "$adapter_output" | awk -F '\t' '
+            $4 == "insert_reserved" {
+                rows++
+                if ($11 != 32 || $12 != $13 || $14 != 3 || $15 != 64)
+                    exit 1
+            }
+            END { if (rows != 2) exit 1 }
+        '
+    fi
     adapter_output=$($adapter_binary --smoke --count 1 --samples 1)
     printf '%s\n' "$adapter_output" |
         check_adapter_output "$adapter_name" 1 1

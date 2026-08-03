@@ -133,6 +133,83 @@ static bool get_key(void *map, bench_key_kind kind, uint64_t key,
     return bench_adapter.get_cstr(map, string_key, value);
 }
 
+static void test_reserved_insert_does_not_grow(bench_key_kind kind)
+{
+    enum { entry_count = 32, expected_buckets = 64 };
+    char keys[entry_count][24];
+    bench_alloc_stats constructor_stats;
+    bench_alloc_stats ended;
+    bool inserted = false;
+    uint64_t value = 0u;
+    size_t index;
+    void *map;
+
+    for (index = 0u; index < entry_count; ++index) {
+        assert(snprintf(keys[index], sizeof(keys[index]), "key-%zu", index) >
+               0);
+    }
+    bench_alloc_reset();
+    bench_alloc_begin();
+    map = bench_adapter.create(kind, entry_count);
+    assert(map != NULL);
+    assert(bench_adapter.capacity(map) == expected_buckets);
+    constructor_stats = bench_alloc_snapshot();
+    assert(bench_adapter.reserve(map, entry_count));
+    assert_stats_equal(bench_alloc_snapshot(), constructor_stats);
+    for (index = 0u; index < entry_count; ++index) {
+        assert(put_key(map, kind, (uint64_t)index, keys[index],
+                       (uint64_t)(index + 100u), &inserted));
+        assert(inserted);
+        assert(bench_adapter.capacity(map) == expected_buckets);
+        assert_stats_equal(bench_alloc_snapshot(), constructor_stats);
+    }
+    assert(bench_adapter.size(map) == entry_count);
+    for (index = 0u; index < entry_count; ++index) {
+        assert(get_key(map, kind, (uint64_t)index, keys[index], &value));
+        assert(value == (uint64_t)(index + 100u));
+    }
+    bench_adapter.destroy(map);
+    ended = bench_alloc_end();
+    assert(ended.current_bytes == 0u);
+    assert(ended.allocations == ended.frees);
+}
+
+static void test_expected_entry_boundaries(bench_key_kind kind)
+{
+    static const struct expected_case {
+        size_t entries;
+        size_t buckets;
+        size_t threshold;
+    } cases[] = {
+        {9u, 16u, 9u},
+        {10u, 32u, 19u},
+        {19u, 32u, 19u},
+        {20u, 64u, 38u},
+        {32u, 64u, 38u}
+    };
+    size_t index;
+
+    for (index = 0u; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+        bench_alloc_stats before_reserve;
+        bench_alloc_stats ended;
+        void *map;
+
+        bench_alloc_reset();
+        bench_alloc_begin();
+        map = bench_adapter.create(kind, cases[index].entries);
+        assert(map != NULL);
+        assert(bench_adapter.capacity(map) == cases[index].buckets);
+        before_reserve = bench_alloc_snapshot();
+        assert(bench_adapter.reserve(map, cases[index].threshold));
+        assert(!bench_adapter.reserve(map, cases[index].threshold + 1u));
+        assert_stats_equal(bench_alloc_snapshot(), before_reserve);
+        bench_adapter.destroy(map);
+        ended = bench_alloc_end();
+        assert(ended.current_bytes == 0u);
+        assert(ended.allocations == ended.frees);
+    }
+}
+
 static void test_failed_growth_preserves_map(bench_key_kind kind,
                                              size_t fail_on_call)
 {
@@ -227,6 +304,10 @@ int main(void)
     test_empty_map(BENCH_KEYS_U64);
     test_empty_map(BENCH_KEYS_CSTR);
     test_string_contract();
+    test_reserved_insert_does_not_grow(BENCH_KEYS_U64);
+    test_reserved_insert_does_not_grow(BENCH_KEYS_CSTR);
+    test_expected_entry_boundaries(BENCH_KEYS_U64);
+    test_expected_entry_boundaries(BENCH_KEYS_CSTR);
     test_failed_growth_preserves_map(BENCH_KEYS_U64, 1u);
     test_failed_growth_preserves_map(BENCH_KEYS_U64, 2u);
     test_failed_growth_preserves_map(BENCH_KEYS_CSTR, 1u);

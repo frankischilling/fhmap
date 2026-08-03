@@ -74,21 +74,30 @@ static int tidwall_cstr_compare(const void *left, const void *right,
     return strcmp(a->key, b->key);
 }
 
-static bool tidwall_expected_is_safe(size_t expected, size_t element_size)
+static size_t tidwall_entry_threshold(size_t buckets)
+{
+    return (buckets / 5u) * 3u + ((buckets % 5u) * 3u) / 5u;
+}
+
+static bool tidwall_raw_bucket_request(size_t expected, size_t element_size,
+                                       size_t *request)
 {
     size_t bucket_size;
-    size_t capacity = 16u;
+    size_t buckets = 16u;
     const size_t alignment = sizeof(uintptr_t);
 
+    if (request == NULL) return false;
     if (element_size > SIZE_MAX - sizeof(uint64_t)) return false;
     bucket_size = sizeof(uint64_t) + element_size;
     if (bucket_size > SIZE_MAX - (alignment - 1u)) return false;
     bucket_size = (bucket_size + alignment - 1u) & ~(alignment - 1u);
-    while (capacity < expected) {
-        if (capacity > SIZE_MAX / 2u) return false;
-        capacity *= 2u;
+    while (tidwall_entry_threshold(buckets) < expected) {
+        if (buckets > SIZE_MAX / 2u) return false;
+        buckets *= 2u;
     }
-    return capacity <= SIZE_MAX / bucket_size;
+    if (buckets > SIZE_MAX / bucket_size) return false;
+    *request = buckets;
+    return true;
 }
 
 static void *tidwall_bench_create(bench_key_kind kind, size_t expected)
@@ -97,6 +106,7 @@ static void *tidwall_bench_create(bench_key_kind kind, size_t expected)
     int (*compare)(const void *, const void *, void *);
     tidwall_bench_map *map;
     size_t element_size;
+    size_t raw_buckets;
 
     if (kind == BENCH_KEYS_U64) {
         element_size = sizeof(tidwall_u64_item);
@@ -109,13 +119,14 @@ static void *tidwall_bench_create(bench_key_kind kind, size_t expected)
     } else {
         return NULL;
     }
-    if (!tidwall_expected_is_safe(expected, element_size)) return NULL;
+    if (!tidwall_raw_bucket_request(expected, element_size, &raw_buckets))
+        return NULL;
 
     map = (tidwall_bench_map *)bench_malloc(sizeof(*map));
     if (map == NULL) return NULL;
     map->kind = kind;
     map->map = hashmap_new_with_allocator(
-        bench_malloc, bench_realloc, bench_free, element_size, expected,
+        bench_malloc, bench_realloc, bench_free, element_size, raw_buckets,
         tidwall_seed_zero, tidwall_seed_one, hash, compare, NULL, NULL);
     if (map->map == NULL) {
         bench_free(map);
@@ -127,16 +138,13 @@ static void *tidwall_bench_create(bench_key_kind kind, size_t expected)
 static bool tidwall_bench_reserve(void *raw_map, size_t expected)
 {
     tidwall_bench_map *map = tidwall_bench_cast(raw_map);
-    size_t element_size;
+    size_t buckets;
 
     if (map == NULL) return false;
-    if (map->kind == BENCH_KEYS_U64)
-        element_size = sizeof(tidwall_u64_item);
-    else if (map->kind == BENCH_KEYS_CSTR)
-        element_size = sizeof(tidwall_cstr_item);
-    else
+    if (map->kind != BENCH_KEYS_U64 && map->kind != BENCH_KEYS_CSTR)
         return false;
-    return tidwall_expected_is_safe(expected, element_size);
+    buckets = hashmap_nbuckets(map->map);
+    return expected <= tidwall_entry_threshold(buckets);
 }
 
 static bool tidwall_bench_put_u64(void *raw_map, uint64_t key,

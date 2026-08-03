@@ -10,6 +10,7 @@ static size_t malloc_calls_until_failure;
 
 void *__real_bench_malloc(size_t size);
 void *__real_bench_calloc(size_t count, size_t size);
+size_t pottery_bench_test_u64_hash(uint64_t key);
 
 static bool fail_allocation(void)
 {
@@ -37,6 +38,24 @@ static void assert_stats_equal(bench_alloc_stats actual,
     assert(actual.peak_bytes == expected.peak_bytes);
     assert(actual.allocations == expected.allocations);
     assert(actual.frees == expected.frees);
+}
+
+static void test_u64_hash_identity(void)
+{
+    assert(pottery_bench_test_u64_hash(UINT64_C(0)) == (size_t)0u);
+    assert(pottery_bench_test_u64_hash(UINT64_C(1)) == (size_t)1u);
+    if (sizeof(size_t) >= sizeof(uint64_t)) {
+        assert(pottery_bench_test_u64_hash(
+                   UINT64_C(0x0123456789abcdef)) ==
+               (size_t)UINT64_C(0x0123456789abcdef));
+        assert(pottery_bench_test_u64_hash(UINT64_MAX) ==
+               (size_t)UINT64_MAX);
+    } else if (sizeof(size_t) == sizeof(uint32_t)) {
+        assert(pottery_bench_test_u64_hash(
+                   UINT64_C(0x0123456789abcdef)) ==
+               (size_t)UINT32_C(0x88888888));
+        assert(pottery_bench_test_u64_hash(UINT64_MAX) == (size_t)0u);
+    }
 }
 
 static void test_empty_map(bench_key_kind kind)
@@ -309,6 +328,7 @@ static void test_wrong_kind_and_invalid_create(void)
 int main(void)
 {
     assert(strcmp(bench_adapter.name, "pottery") == 0);
+    test_u64_hash_identity();
     test_empty_map(BENCH_KEYS_U64);
     test_empty_map(BENCH_KEYS_CSTR);
     test_string_contract();

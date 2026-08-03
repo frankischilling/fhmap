@@ -20,9 +20,23 @@ typedef struct pottery_cstr_item {
 
 static size_t pottery_u64_hash(uint64_t key)
 {
-    return (size_t)pottery_knuth_hash_u64(
-        key, sizeof(size_t) * (size_t)CHAR_BIT);
+    const size_t width = sizeof(size_t) * (size_t)CHAR_BIT;
+    uint64_t folded = key;
+    size_t shift;
+
+    if (sizeof(size_t) >= sizeof(key)) return (size_t)key;
+    for (shift = width; shift < 64u; shift += width) {
+        folded ^= key >> shift;
+    }
+    return (size_t)folded;
 }
+
+#ifdef FHMAP_BENCH_ADAPTER_TESTING
+size_t pottery_bench_test_u64_hash(uint64_t key)
+{
+    return pottery_u64_hash(key);
+}
+#endif
 
 static size_t pottery_cstr_hash(const char *key)
 {
