@@ -17,12 +17,23 @@ usage()
 fail()
 {
     printf 'fetch-competitors: %s\n' "$1" >&2
+    if test -n "${active_staging-}" &&
+            { test -e "$active_staging" || test -L "$active_staging"; }; then
+        printf '%s\n' \
+            "fetch-competitors: inspect or remove the incomplete checkout before retrying: $active_staging" \
+            >&2
+    fi
     exit 1
 }
 
 validate_lock()
 {
     test -f "$lock_file" || fail "lock file not found: $lock_file"
+    test -s "$lock_file" || fail "lock file is empty: $lock_file"
+    last_character=$(tail -c 1 "$lock_file") ||
+        fail "could not read the end of the lock file: $lock_file"
+    test -z "$last_character" ||
+        fail "lock file must end with a newline: $lock_file"
 
     awk -F '\t' '
         BEGIN {
@@ -80,49 +91,80 @@ validate_lock()
 
 verify_checkout()
 {
-    name=$1
-    repository=$2
-    commit=$3
-    license_path=$4
-    source_paths=$5
-    target=$6
+    verify_name=$1
+    verify_repository=$2
+    verify_commit=$3
+    verify_license_path=$4
+    verify_source_paths=$5
+    verify_target=$6
 
-    test -d "$target" || fail "$name checkout is not a directory: $target"
-    inside=$(git -C "$target" rev-parse --is-inside-work-tree 2>/dev/null) ||
-        fail "$name target is not a Git worktree: $target"
-    test "$inside" = true || fail "$name target is not a Git worktree: $target"
+    test ! -L "$verify_target" ||
+        fail "$verify_name checkout must not be a symbolic link: $verify_target"
+    test -d "$verify_target" ||
+        fail "$verify_name checkout is not a directory: $verify_target"
+    verify_target_physical=$(CDPATH='' cd "$verify_target" && pwd -P) ||
+        fail "could not resolve the $verify_name checkout path: $verify_target"
+    verify_inside=$(git -C "$verify_target" rev-parse \
+        --is-inside-work-tree 2>/dev/null) ||
+        fail "$verify_name target is not a Git worktree: $verify_target"
+    test "$verify_inside" = true ||
+        fail "$verify_name target is not a Git worktree: $verify_target"
+    verify_top_level=$(git -C "$verify_target" rev-parse \
+        --show-toplevel 2>/dev/null) ||
+        fail "could not find the $verify_name worktree root: $verify_target"
+    verify_top_physical=$(CDPATH='' cd "$verify_top_level" && pwd -P) ||
+        fail "could not resolve the $verify_name worktree root: $verify_top_level"
+    test "$verify_top_physical" = "$verify_target_physical" ||
+        fail "$verify_name target is nested inside another Git worktree: $verify_target"
 
-    head_commit=$(git -C "$target" rev-parse HEAD 2>/dev/null) ||
-        fail "could not read $name HEAD"
-    test "$head_commit" = "$commit" ||
-        fail "$name is at $head_commit, expected $commit"
-    if git -C "$target" symbolic-ref -q HEAD >/dev/null 2>&1; then
-        fail "$name checkout is attached to a branch"
+    verify_head_commit=$(git -C "$verify_target" rev-parse HEAD 2>/dev/null) ||
+        fail "could not read $verify_name HEAD"
+    test "$verify_head_commit" = "$verify_commit" ||
+        fail "$verify_name is at $verify_head_commit, expected $verify_commit"
+    if git -C "$verify_target" symbolic-ref -q HEAD >/dev/null 2>&1; then
+        fail "$verify_name checkout is attached to a branch"
     fi
 
-    origin=$(git -C "$target" remote get-url origin 2>/dev/null) ||
-        fail "$name checkout has no origin"
-    test "$origin" = "$repository" ||
-        fail "$name origin is $origin, expected $repository"
+    verify_origin=$(git -C "$verify_target" config --local --get \
+        remote.origin.url 2>/dev/null) ||
+        fail "$verify_name checkout has no origin"
+    test "$verify_origin" = "$verify_repository" ||
+        fail "$verify_name origin is $verify_origin, expected $verify_repository"
 
-    test -f "$target/$license_path" ||
-        fail "$name license file is missing: $license_path"
+    verify_status=$(GIT_OPTIONAL_LOCKS=0 git -C "$verify_target" status \
+        --porcelain=v1 --untracked-files=all 2>/dev/null) ||
+        fail "could not read the $verify_name checkout status"
+    test -z "$verify_status" ||
+        fail "$verify_name checkout has local changes: $verify_target"
 
-    remaining_paths=$source_paths
-    while test -n "$remaining_paths"
+    test -f "$verify_target/$verify_license_path" ||
+        fail "$verify_name license file is missing: $verify_license_path"
+    verify_tracked_path=$(git -C "$verify_target" ls-tree --name-only HEAD -- \
+        "$verify_license_path" 2>/dev/null) ||
+        fail "could not inspect the $verify_name license path: $verify_license_path"
+    test "$verify_tracked_path" = "$verify_license_path" ||
+        fail "$verify_name license path is not tracked at HEAD: $verify_license_path"
+
+    verify_remaining_paths=$verify_source_paths
+    while test -n "$verify_remaining_paths"
     do
-        case $remaining_paths in
+        case $verify_remaining_paths in
             *,*)
-                source_path=${remaining_paths%%,*}
-                remaining_paths=${remaining_paths#*,}
+                verify_source_path=${verify_remaining_paths%%,*}
+                verify_remaining_paths=${verify_remaining_paths#*,}
                 ;;
             *)
-                source_path=$remaining_paths
-                remaining_paths=
+                verify_source_path=$verify_remaining_paths
+                verify_remaining_paths=
                 ;;
         esac
-        test -e "$target/$source_path" ||
-            fail "$name source path is missing: $source_path"
+        test -e "$verify_target/$verify_source_path" ||
+            fail "$verify_name source path is missing: $verify_source_path"
+        verify_tracked_path=$(git -C "$verify_target" ls-tree --name-only \
+            HEAD -- "$verify_source_path" 2>/dev/null) ||
+            fail "could not inspect the $verify_name source path: $verify_source_path"
+        test "$verify_tracked_path" = "$verify_source_path" ||
+            fail "$verify_name source path is not tracked at HEAD: $verify_source_path"
     done
 }
 
@@ -138,9 +180,11 @@ fetch_all()
         fail "destination is not a directory: $destination"
     fi
     mkdir -p "$destination" || fail "could not create destination: $destination"
-    destination=$(CDPATH='' cd "$destination" && pwd) ||
+    destination=$(CDPATH='' cd "$destination" && pwd -P) ||
         fail "could not resolve destination: $destination"
-    test "$destination" != / || fail "refusing the filesystem root as a destination"
+    case $destination in
+        ''|/|//) fail "refusing the filesystem root as a destination" ;;
+    esac
 
     while IFS="$tab" read -r name repository commit license_path source_paths
     do
@@ -155,13 +199,26 @@ fetch_all()
             continue
         fi
 
+        staging=$destination/.fhmap-fetch-$name
+        if test -e "$staging" || test -L "$staging"; then
+            fail "$name staging checkout already exists; inspect or remove it before retrying: $staging"
+        fi
+
+        active_staging=$staging
         printf 'Fetching %s at %s\n' "$name" "$commit"
-        git clone --filter=blob:none --no-checkout "$repository" "$target" ||
+        git clone --filter=blob:none --no-checkout "$repository" "$staging" ||
             fail "could not clone $name from $repository"
-        git -C "$target" fetch --filter=blob:none origin "$commit" ||
+        git -C "$staging" fetch --filter=blob:none origin "$commit" ||
             fail "could not fetch $name commit $commit"
-        git -C "$target" checkout --detach "$commit" ||
+        git -C "$staging" checkout --detach "$commit" ||
             fail "could not check out $name commit $commit"
+        verify_checkout "$name" "$repository" "$commit" "$license_path" \
+            "$source_paths" "$staging"
+        if test -e "$target" || test -L "$target"; then
+            fail "$name target appeared while its checkout was being prepared: $target"
+        fi
+        mv "$staging" "$target" || fail "could not publish the $name checkout"
+        active_staging=
         verify_checkout "$name" "$repository" "$commit" "$license_path" \
             "$source_paths" "$target"
     done < "$lock_file"

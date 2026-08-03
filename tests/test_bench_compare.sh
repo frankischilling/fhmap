@@ -5,34 +5,51 @@ set -eu
 repo_root=$(pwd -P)
 fetcher=$repo_root/bench/compare/fetch-competitors.sh
 lock=$repo_root/bench/compare/competitors.lock
-lock_test_dir=$(mktemp -d)
-git_calls=$lock_test_dir/git-calls
-mkdir "$lock_test_dir/bin"
-printf '%s\n' '#!/bin/sh' \
-    "printf '%s\\n' \"\$*\" >>\"\$BENCH_GIT_CALLS\"" 'exit 97' \
-    >"$lock_test_dir/bin/git"
-chmod +x "$lock_test_dir/bin/git"
-
 binary=./build/bench-compare/fhmap
 permuted_binary=./build/bench-compare/fhmap_permuted_hits
-stdout_file=$(mktemp)
-stderr_file=$(mktemp)
+fetch_test_dir=$(mktemp -d /tmp/fhmap-fetch-test.XXXXXX)
+stdout_file=$fetch_test_dir/stdout
+stderr_file=$fetch_test_dir/stderr
+names='cc verstable khashl khash mlib stc stb_ds uthash tidwall pottery'
+
 cleanup()
 {
-    rm -f "$stdout_file" "$stderr_file" "$git_calls" \
-        "$lock_test_dir/bin/git"
-    rmdir "$lock_test_dir/bin" "$lock_test_dir" 2>/dev/null || :
+    case $fetch_test_dir in
+        /tmp/fhmap-fetch-test.??????) rm -rf "$fetch_test_dir" ;;
+        *) return 1 ;;
+    esac
 }
 trap cleanup EXIT HUP INT TERM
 
+expect_command_failure()
+{
+    : >"$stdout_file"
+    : >"$stderr_file"
+    if "$@" >"$stdout_file" 2>"$stderr_file"; then
+        printf 'expected command to fail:' >&2
+        printf ' %s' "$@" >&2
+        printf '\n' >&2
+        return 1
+    fi
+    test -s "$stderr_file"
+}
+
+offline_dir=$fetch_test_dir/offline
+mkdir "$offline_dir" "$offline_dir/bin" "$offline_dir/cwd"
+offline_git_calls=$offline_dir/git-calls
+printf '%s\n' '#!/bin/sh' \
+    "printf '%s\\n' \"\$*\" >>\"\$BENCH_GIT_CALLS\"" 'exit 97' \
+    >"$offline_dir/bin/git"
+chmod +x "$offline_dir/bin/git"
+
 (
-    cd "$lock_test_dir"
-    BENCH_GIT_CALLS=$git_calls \
-    PATH=$lock_test_dir/bin:$PATH \
+    cd "$offline_dir/cwd"
+    BENCH_GIT_CALLS=$offline_git_calls \
+    PATH=$offline_dir/bin:$PATH \
         "$fetcher" --check-lock
 )
-test ! -e "$git_calls"
-test "$(find "$lock_test_dir" -mindepth 1 -maxdepth 1 ! -name bin | wc -l)" -eq 0
+test ! -e "$offline_git_calls"
+test -z "$(find "$offline_dir/cwd" -mindepth 1 -print -quit)"
 
 awk -F '\t' '
     BEGIN {
@@ -95,8 +112,303 @@ expect_bad_fetch_arguments --check-lock extra
 expect_bad_fetch_arguments --dest
 expect_bad_fetch_arguments --dest ''
 expect_bad_fetch_arguments --dest /
-expect_bad_fetch_arguments --dest "$lock_test_dir/destination" extra
+expect_bad_fetch_arguments --dest -unsafe
+expect_bad_fetch_arguments --dest "$fetch_test_dir/destination" extra
 expect_bad_fetch_arguments --unknown
+
+newline_dir=$fetch_test_dir/newline
+mkdir "$newline_dir"
+cp "$fetcher" "$newline_dir/fetch-competitors.sh"
+lock_size=$(wc -c <"$lock")
+dd if="$lock" of="$newline_dir/competitors.lock" bs=1 \
+    count=$((lock_size - 1)) 2>/dev/null
+expect_command_failure "$newline_dir/fetch-competitors.sh" --check-lock
+: >"$newline_dir/competitors.lock"
+expect_command_failure "$newline_dir/fetch-competitors.sh" --check-lock
+
+fixture_dir=$fetch_test_dir/fixture
+fixture_runner=$fixture_dir/runner
+fixture_sources=$fixture_dir/sources
+fixture_work=$fixture_dir/work
+fixture_bin=$fixture_dir/bin
+fixture_git_config=$fixture_dir/gitconfig
+fixture_git_calls=$fixture_dir/git-calls
+fixture_fetcher=$fixture_runner/fetch-competitors.sh
+fixture_lock=$fixture_runner/competitors.lock
+real_git=$(command -v git)
+mkdir -p "$fixture_runner" "$fixture_sources" "$fixture_work" "$fixture_bin"
+cp "$fetcher" "$fixture_fetcher"
+: >"$fixture_lock"
+wrong_cc_commit=
+
+for name in $names
+do
+    work=$fixture_work/$name
+    bare=$fixture_sources/$name.git
+    "$real_git" init -q "$work"
+    printf 'fixture license\n' >"$work/LICENSE"
+    printf '%s fixture source\n' "$name" >"$work/source.h"
+    "$real_git" -C "$work" add LICENSE source.h
+    "$real_git" -C "$work" -c user.name=Fixture \
+        -c user.email=fixture@example.com commit -q -m fixture
+    commit=$("$real_git" -C "$work" rev-parse HEAD)
+    if test "$name" = cc; then
+        printf 'second fixture source\n' >>"$work/source.h"
+        "$real_git" -C "$work" add source.h
+        "$real_git" -C "$work" -c user.name=Fixture \
+            -c user.email=fixture@example.com commit -q -m second
+        wrong_cc_commit=$("$real_git" -C "$work" rev-parse HEAD)
+    fi
+    "$real_git" clone -q --bare "$work" "$bare"
+    printf '%s\thttps://github.com/fhmap-fetch-test/%s.git\t%s\tLICENSE\tsource.h\n' \
+        "$name" "$name" "$commit" >>"$fixture_lock"
+done
+
+"$real_git" config --file "$fixture_git_config" \
+    "url.file://$fixture_sources/.insteadOf" \
+    https://github.com/fhmap-fetch-test/
+
+printf '%s\n' '#!/bin/sh' \
+    "printf '%s\\n' \"\$*\" >>\"\$BENCH_GIT_CALLS\"" \
+    "if test -n \"\${BENCH_FAIL_MATCH-}\"; then" \
+    "    case \" \$* \" in" \
+    "        *\"\$BENCH_FAIL_MATCH\"*) exit 89 ;;" \
+    '    esac' \
+    'fi' \
+    "exec \"\$BENCH_REAL_GIT\" \"\$@\"" >"$fixture_bin/git"
+chmod +x "$fixture_bin/git"
+
+active_fetcher=$fixture_fetcher
+fixture_fail_match=
+run_fixture()
+{
+    BENCH_REAL_GIT=$real_git \
+    BENCH_GIT_CALLS=$fixture_git_calls \
+    BENCH_FAIL_MATCH=$fixture_fail_match \
+    GIT_CONFIG_GLOBAL=$fixture_git_config \
+    GIT_CONFIG_NOSYSTEM=1 \
+    PATH=$fixture_bin:$PATH \
+        "$active_fetcher" "$@"
+}
+
+expect_fixture_failure()
+{
+    : >"$stdout_file"
+    : >"$stderr_file"
+    if run_fixture "$@" >"$stdout_file" 2>"$stderr_file"; then
+        printf 'fetcher accepted invalid checkout state:' >&2
+        printf ' %s' "$@" >&2
+        printf '\n' >&2
+        return 1
+    fi
+    test -s "$stderr_file"
+}
+
+append_verify_calls()
+{
+    append_call_file=$1
+    append_checkout=$2
+    printf '%s\n' \
+        "-C $append_checkout rev-parse --is-inside-work-tree" \
+        "-C $append_checkout rev-parse --show-toplevel" \
+        "-C $append_checkout rev-parse HEAD" \
+        "-C $append_checkout symbolic-ref -q HEAD" \
+        "-C $append_checkout config --local --get remote.origin.url" \
+        "-C $append_checkout status --porcelain=v1 --untracked-files=all" \
+        "-C $append_checkout ls-tree --name-only HEAD -- LICENSE" \
+        "-C $append_checkout ls-tree --name-only HEAD -- source.h" \
+        >>"$append_call_file"
+}
+
+write_runner_with_commit()
+{
+    runner=$1
+    changed_name=$2
+    changed_commit=$3
+    mkdir "$runner"
+    cp "$fetcher" "$runner/fetch-competitors.sh"
+    awk -F '\t' -v OFS='\t' -v wanted="$changed_name" \
+        -v commit="$changed_commit" \
+        '{ if ($1 == wanted) $3 = commit; print }' \
+        "$fixture_lock" >"$runner/competitors.lock"
+}
+
+checkout_state()
+{
+    checkout=$1
+    "$real_git" -C "$checkout" rev-parse HEAD
+    "$real_git" -C "$checkout" config --local --get remote.origin.url
+    "$real_git" -C "$checkout" status --porcelain=v1 --untracked-files=all
+    "$real_git" -C "$checkout" diff --binary | cksum
+}
+
+if test -d /proc/self/root && test ! -e /cc && test ! -L /cc; then
+    : >"$fixture_git_calls"
+    expect_fixture_failure --dest /proc/self/root
+    test ! -s "$fixture_git_calls"
+    test ! -e /cc
+    test ! -L /cc
+fi
+
+fixture_destination=$fixture_dir/destination
+expected_calls=$fixture_dir/expected-calls
+: >"$fixture_git_calls"
+: >"$expected_calls"
+if ! run_fixture --dest "$fixture_destination" \
+        >"$stdout_file" 2>"$stderr_file"; then
+    sed 's/^/fixture fetch failed: /' "$stderr_file" >&2
+    exit 1
+fi
+for name in $names
+do
+    repository=https://github.com/fhmap-fetch-test/$name.git
+    commit=$(awk -F '\t' -v wanted="$name" '$1 == wanted { print $3 }' \
+        "$fixture_lock")
+    staging=$fixture_destination/.fhmap-fetch-$name
+    checkout=$fixture_destination/$name
+    printf '%s\n' \
+        "clone --filter=blob:none --no-checkout $repository $staging" \
+        "-C $staging fetch --filter=blob:none origin $commit" \
+        "-C $staging checkout --detach $commit" >>"$expected_calls"
+    append_verify_calls "$expected_calls" "$staging"
+    append_verify_calls "$expected_calls" "$checkout"
+    test -d "$checkout"
+    test ! -e "$staging"
+done
+cmp "$expected_calls" "$fixture_git_calls"
+stored_origin=$("$real_git" -C "$fixture_destination/cc" config --local \
+    --get remote.origin.url)
+rewritten_origin=$(GIT_CONFIG_GLOBAL=$fixture_git_config \
+    GIT_CONFIG_NOSYSTEM=1 "$real_git" -C "$fixture_destination/cc" \
+    remote get-url origin)
+test "$stored_origin" = https://github.com/fhmap-fetch-test/cc.git
+test "$rewritten_origin" != "$stored_origin"
+
+: >"$fixture_git_calls"
+: >"$expected_calls"
+if ! run_fixture --dest "$fixture_destination" \
+        >"$stdout_file" 2>"$stderr_file"; then
+    sed 's/^/fixture verification failed: /' "$stderr_file" >&2
+    exit 1
+fi
+for name in $names
+do
+    append_verify_calls "$expected_calls" "$fixture_destination/$name"
+done
+cmp "$expected_calls" "$fixture_git_calls"
+test -z "$(grep -E '(^| )(clone|fetch|checkout)( |$)' \
+    "$fixture_git_calls" || true)"
+
+partial_destination=$fixture_dir/partial
+: >"$fixture_git_calls"
+fixture_fail_match=' fetch '
+expect_fixture_failure --dest "$partial_destination"
+fixture_fail_match=
+test ! -e "$partial_destination/cc"
+test -d "$partial_destination/.fhmap-fetch-cc"
+partial_commit=$(awk -F '\t' '$1 == "cc" { print $3 }' "$fixture_lock")
+printf '%s\n' \
+    "clone --filter=blob:none --no-checkout https://github.com/fhmap-fetch-test/cc.git $partial_destination/.fhmap-fetch-cc" \
+    "-C $partial_destination/.fhmap-fetch-cc fetch --filter=blob:none origin $partial_commit" \
+    >"$expected_calls"
+cmp "$expected_calls" "$fixture_git_calls"
+grep 'inspect or remove.*before retrying' "$stderr_file" >/dev/null
+: >"$fixture_git_calls"
+expect_fixture_failure --dest "$partial_destination"
+test ! -s "$fixture_git_calls"
+
+wrong_head_destination=$fixture_dir/wrong-head
+cp -R "$fixture_destination" "$wrong_head_destination"
+"$real_git" -C "$wrong_head_destination/cc" checkout -q --detach \
+    "$wrong_cc_commit"
+before=$(checkout_state "$wrong_head_destination/cc")
+expect_fixture_failure --dest "$wrong_head_destination"
+after=$(checkout_state "$wrong_head_destination/cc")
+test "$before" = "$after"
+
+wrong_origin_destination=$fixture_dir/wrong-origin
+cp -R "$fixture_destination" "$wrong_origin_destination"
+"$real_git" -C "$wrong_origin_destination/cc" config remote.origin.url \
+    https://github.com/fhmap-fetch-test/wrong.git
+before=$(checkout_state "$wrong_origin_destination/cc")
+expect_fixture_failure --dest "$wrong_origin_destination"
+after=$(checkout_state "$wrong_origin_destination/cc")
+test "$before" = "$after"
+
+symlink_destination=$fixture_dir/symlink
+mkdir "$symlink_destination"
+ln -s "$fixture_destination/cc" "$symlink_destination/cc"
+expect_fixture_failure --dest "$symlink_destination"
+test -L "$symlink_destination/cc"
+test ! -e "$symlink_destination/verstable"
+
+nested_destination=$fixture_dir/nested
+mkdir "$nested_destination"
+"$real_git" init -q "$nested_destination"
+mkdir "$nested_destination/cc"
+printf 'nested license\n' >"$nested_destination/cc/LICENSE"
+printf 'nested source\n' >"$nested_destination/cc/source.h"
+"$real_git" -C "$nested_destination" add cc/LICENSE cc/source.h
+"$real_git" -C "$nested_destination" -c user.name=Fixture \
+    -c user.email=fixture@example.com commit -q -m nested
+nested_commit=$("$real_git" -C "$nested_destination" rev-parse HEAD)
+"$real_git" -C "$nested_destination" checkout -q --detach
+"$real_git" -C "$nested_destination" remote add origin \
+    https://github.com/fhmap-fetch-test/cc.git
+nested_runner=$fixture_dir/nested-runner
+write_runner_with_commit "$nested_runner" cc "$nested_commit"
+active_fetcher=$nested_runner/fetch-competitors.sh
+expect_fixture_failure --dest "$nested_destination"
+test ! -e "$nested_destination/verstable"
+active_fetcher=$fixture_fetcher
+
+dirty_destination=$fixture_dir/dirty
+cp -R "$fixture_destination" "$dirty_destination"
+printf 'local edit\n' >>"$dirty_destination/cc/source.h"
+before=$(checkout_state "$dirty_destination/cc")
+expect_fixture_failure --dest "$dirty_destination"
+after=$(checkout_state "$dirty_destination/cc")
+test "$before" = "$after"
+
+untracked_destination=$fixture_dir/untracked
+cp -R "$fixture_destination" "$untracked_destination"
+printf 'local file\n' >"$untracked_destination/cc/local.txt"
+before=$(checkout_state "$untracked_destination/cc")
+untracked_checksum=$(cksum <"$untracked_destination/cc/local.txt")
+expect_fixture_failure --dest "$untracked_destination"
+after=$(checkout_state "$untracked_destination/cc")
+test "$before" = "$after"
+test "$untracked_checksum" = "$(cksum <"$untracked_destination/cc/local.txt")"
+
+missing_destination=$fixture_dir/missing
+cp -R "$fixture_destination" "$missing_destination"
+"$real_git" -C "$missing_destination/cc" rm -q source.h
+"$real_git" -C "$missing_destination/cc" -c user.name=Fixture \
+    -c user.email=fixture@example.com commit -q -m missing
+missing_commit=$("$real_git" -C "$missing_destination/cc" rev-parse HEAD)
+missing_runner=$fixture_dir/missing-runner
+write_runner_with_commit "$missing_runner" cc "$missing_commit"
+active_fetcher=$missing_runner/fetch-competitors.sh
+before=$(checkout_state "$missing_destination/cc")
+expect_fixture_failure --dest "$missing_destination"
+after=$(checkout_state "$missing_destination/cc")
+test "$before" = "$after"
+test ! -e "$missing_destination/cc/source.h"
+
+substitute_destination=$fixture_dir/substitute
+cp -R "$missing_destination" "$substitute_destination"
+printf '/source.h\n' >>"$substitute_destination/cc/.git/info/exclude"
+printf 'untracked substitute\n' >"$substitute_destination/cc/source.h"
+test -z "$("$real_git" -C "$substitute_destination/cc" status \
+    --porcelain=v1 --untracked-files=all)"
+before=$(checkout_state "$substitute_destination/cc")
+substitute_checksum=$(cksum <"$substitute_destination/cc/source.h")
+expect_fixture_failure --dest "$substitute_destination"
+after=$(checkout_state "$substitute_destination/cc")
+test "$before" = "$after"
+test "$substitute_checksum" = \
+    "$(cksum <"$substitute_destination/cc/source.h")"
+active_fetcher=$fixture_fetcher
 
 output=$($binary --smoke --count 32 --samples 3)
 rows=$(printf '%s\n' "$output" |
