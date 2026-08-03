@@ -679,6 +679,11 @@ check_adapter_output()
     '
 }
 
+boundary_output=$($binary --smoke --count 11 --samples 1)
+printf '%s\n' "$boundary_output" |
+    check_adapter_output fhmap 11 1
+
+pottery_boundary_output=
 for adapter_name in cc verstable khashl khash mlib stc stb_ds uthash tidwall pottery
 do
     adapter_binary=./build/bench-compare/$adapter_name
@@ -689,6 +694,12 @@ do
     adapter_output=$($adapter_binary --smoke --count 1 --samples 1)
     printf '%s\n' "$adapter_output" |
         check_adapter_output "$adapter_name" 1 1
+    adapter_output=$($adapter_binary --smoke --count 11 --samples 1)
+    printf '%s\n' "$adapter_output" |
+        check_adapter_output "$adapter_name" 11 1
+    if test "$adapter_name" = pottery; then
+        pottery_boundary_output=$adapter_output
+    fi
     adapter_output=$($adapter_binary --smoke --count 4096 --samples 1)
     printf '%s\n' "$adapter_output" |
         check_adapter_output "$adapter_name" 4096 1
@@ -696,6 +707,25 @@ do
     printf '%s\n' "$adapter_output" |
         check_adapter_output "$adapter_name" 32 1
 done
+
+test -n "$pottery_boundary_output"
+printf '%s\n' "$pottery_boundary_output" | awk -F '\t' '
+    {
+        expected_capacity = $4 == "update" ? 32 : 16
+        if ($11 > $15 || $15 != expected_capacity) exit 1
+    }
+    END { if (NR != 14) exit 1 }
+'
+pottery_boundary_samples=$(
+    ./build/bench-compare/pottery --smoke --count 11 --samples 3
+)
+printf '%s\n' "$pottery_boundary_samples" |
+    check_adapter_output pottery 11 3
+pottery_boundary_metadata=$(printf '%s\n' "$pottery_boundary_output" |
+    awk -F '\t' '{ print $2, $3, $4, $10, $11, $12, $13, $14, $15 }')
+pottery_sample_metadata=$(printf '%s\n' "$pottery_boundary_samples" |
+    awk -F '\t' '{ print $2, $3, $4, $10, $11, $12, $13, $14, $15 }')
+test "$pottery_boundary_metadata" = "$pottery_sample_metadata"
 
 ./build/bench-compare/test_mlib_adapter
 ./build/bench-compare/test_stc_adapter

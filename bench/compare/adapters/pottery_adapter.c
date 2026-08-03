@@ -256,10 +256,10 @@ static size_t pottery_bench_capacity(const void *raw_map)
 
     if (map == NULL) return 0u;
     if (map->kind == BENCH_KEYS_U64)
-        return pottery_u64_bench_capacity(
+        return pottery_u64_bench_bucket_count(
             (pottery_u64_bench_t *)&map->map.u64);
     if (map->kind == BENCH_KEYS_CSTR)
-        return pottery_cstr_bench_capacity(
+        return pottery_cstr_bench_bucket_count(
             (pottery_cstr_bench_t *)&map->map.cstr);
     return 0u;
 }

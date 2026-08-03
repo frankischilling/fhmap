@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 static size_t malloc_calls_until_failure;
@@ -125,6 +126,93 @@ static void test_string_contract(void)
     assert(ended.current_bytes == 0u);
 }
 
+static bool put_boundary_key(void *map, bench_key_kind kind, uint64_t key,
+                             const char *string_key, bool *inserted)
+{
+    if (kind == BENCH_KEYS_U64) {
+        return bench_adapter.put_u64(map, key, key + UINT64_C(100),
+                                     inserted);
+    }
+    return bench_adapter.put_cstr(map, string_key, key + UINT64_C(100),
+                                  inserted);
+}
+
+static bool remove_boundary_key(void *map, bench_key_kind kind, uint64_t key,
+                                const char *string_key)
+{
+    if (kind == BENCH_KEYS_U64) return bench_adapter.remove_u64(map, key);
+    return bench_adapter.remove_cstr(map, string_key);
+}
+
+static void test_bucket_capacity_boundary(bench_key_kind kind)
+{
+    enum {
+        boundary_count = 11,
+        grown_count = 12,
+        expected_boundary_buckets = 16,
+        expected_grown_buckets = 32,
+        sample_count = 3
+    };
+    char keys[grown_count][24];
+    bench_alloc_stats boundary_reference = {0u, 0u, 0u, 0u};
+    bench_alloc_stats shrink_reference = {0u, 0u, 0u, 0u};
+    size_t index;
+    size_t sample;
+
+    for (index = 0u; index < grown_count; ++index) {
+        assert(snprintf(keys[index], sizeof(keys[index]), "key-%zu", index) >
+               0);
+    }
+    for (sample = 0u; sample < sample_count; ++sample) {
+        bench_alloc_stats at_boundary;
+        bench_alloc_stats after_shrink;
+        bench_alloc_stats ended;
+        bool inserted = false;
+        size_t capacity;
+        void *map;
+
+        bench_alloc_reset();
+        bench_alloc_begin();
+        map = bench_adapter.create(kind, 0u);
+        assert(map != NULL);
+        for (index = 0u; index < boundary_count; ++index) {
+            assert(put_boundary_key(map, kind, (uint64_t)index,
+                                    keys[index], &inserted));
+            assert(inserted);
+        }
+        capacity = bench_adapter.capacity(map);
+        assert(bench_adapter.size(map) == boundary_count);
+        assert(bench_adapter.size(map) <= capacity);
+        assert(capacity == expected_boundary_buckets);
+        at_boundary = bench_alloc_snapshot();
+        if (sample == 0u)
+            boundary_reference = at_boundary;
+        else
+            assert_stats_equal(at_boundary, boundary_reference);
+
+        assert(put_boundary_key(map, kind, UINT64_C(11), keys[11],
+                                &inserted));
+        assert(inserted);
+        assert(bench_adapter.size(map) == grown_count);
+        assert(bench_adapter.capacity(map) == expected_grown_buckets);
+        for (index = 0u; index < grown_count; ++index) {
+            assert(remove_boundary_key(map, kind, (uint64_t)index,
+                                       keys[index]));
+        }
+        assert(bench_adapter.size(map) == 0u);
+        assert(bench_adapter.capacity(map) == expected_boundary_buckets);
+        after_shrink = bench_alloc_snapshot();
+        if (sample == 0u)
+            shrink_reference = after_shrink;
+        else
+            assert_stats_equal(after_shrink, shrink_reference);
+        bench_adapter.destroy(map);
+        ended = bench_alloc_end();
+        assert(ended.current_bytes == 0u);
+        assert(ended.allocations == ended.frees);
+    }
+}
+
 static void populate_to_growth(void *map)
 {
     bool inserted = false;
@@ -224,6 +312,8 @@ int main(void)
     test_empty_map(BENCH_KEYS_U64);
     test_empty_map(BENCH_KEYS_CSTR);
     test_string_contract();
+    test_bucket_capacity_boundary(BENCH_KEYS_U64);
+    test_bucket_capacity_boundary(BENCH_KEYS_CSTR);
     test_failed_growth(1u);
     test_failed_growth(2u);
     test_failed_create_cleanup();
