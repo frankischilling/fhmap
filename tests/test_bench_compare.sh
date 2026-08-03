@@ -27,9 +27,11 @@ for expected_binary in \
     mlib_clang stc_clang stb_ds_clang \
     test_mlib_adapter_clang test_stc_adapter_clang \
     test_stb_ds_adapter_clang \
+    test_stb_ds_seed_clang \
     mlib_sanitize stc_sanitize stb_ds_sanitize \
     test_mlib_adapter_sanitize test_stc_adapter_sanitize \
-    test_stb_ds_adapter_sanitize
+    test_stb_ds_adapter_sanitize \
+    test_stb_ds_seed_sanitize
 do
     grep "build/bench-compare/$expected_binary" "$typed_matrix_plan" \
         >/dev/null
@@ -628,6 +630,7 @@ done
 ./build/bench-compare/test_mlib_adapter
 ./build/bench-compare/test_stc_adapter
 ./build/bench-compare/test_stb_ds_adapter
+./build/bench-compare/test_stb_ds_seed
 
 expect_khashl_init_failure()
 {

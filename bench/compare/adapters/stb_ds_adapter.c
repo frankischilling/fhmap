@@ -43,8 +43,6 @@ typedef struct stb_ds_bench_map {
     } raw;
 } stb_ds_bench_map;
 
-static bool stb_ds_seeded;
-
 static stb_ds_bench_map *stb_ds_bench_cast(void *map)
 {
     return (stb_ds_bench_map *)map;
@@ -92,10 +90,6 @@ static void *stb_ds_bench_create(bench_key_kind kind, size_t expected)
         map->raw.u64 = NULL;
     else
         map->raw.cstr = NULL;
-    if (!stb_ds_seeded) {
-        stbds_rand_seed((size_t)UINT32_C(0x6a09e667));
-        stb_ds_seeded = true;
-    }
     return map;
 }
 
@@ -111,6 +105,8 @@ static bool stb_ds_bench_put_u64(void *raw_map, uint64_t key,
     old_size = hmlen(map->raw.u64);
     if (old_size < 0 || (size_t)old_size >= stb_ds_bench_max_entries())
         return false;
+    if (map->raw.u64 == NULL)
+        stbds_rand_seed((size_t)UINT32_C(0x6a09e667));
     hmput(map->raw.u64, key, value);
     new_size = hmlen(map->raw.u64);
     if (new_size < old_size) return false;
@@ -124,8 +120,10 @@ static bool stb_ds_bench_get_u64(void *raw_map, uint64_t key,
     stb_ds_bench_map *map = stb_ds_bench_cast(raw_map);
     ptrdiff_t index;
 
-    if (map == NULL || map->kind != BENCH_KEYS_U64 || value == NULL)
+    if (map == NULL || map->kind != BENCH_KEYS_U64 || value == NULL ||
+        map->raw.u64 == NULL) {
         return false;
+    }
     index = hmgeti(map->raw.u64, key);
     if (index < 0) return false;
     *value = map->raw.u64[index].value;
@@ -137,6 +135,7 @@ static bool stb_ds_bench_remove_u64(void *raw_map, uint64_t key)
     stb_ds_bench_map *map = stb_ds_bench_cast(raw_map);
 
     return map != NULL && map->kind == BENCH_KEYS_U64 &&
+           map->raw.u64 != NULL &&
            hmdel(map->raw.u64, key) != 0;
 }
 
@@ -155,6 +154,8 @@ static bool stb_ds_bench_put_cstr(void *raw_map, const char *key,
     if (old_size < 0 || (size_t)old_size >= stb_ds_bench_max_entries())
         return false;
     borrowed_key = (char *)key;
+    if (map->raw.cstr == NULL)
+        stbds_rand_seed((size_t)UINT32_C(0x6a09e667));
     shput(map->raw.cstr, borrowed_key, value);
     new_size = shlen(map->raw.cstr);
     if (new_size < old_size) return false;
@@ -169,7 +170,7 @@ static bool stb_ds_bench_get_cstr(void *raw_map, const char *key,
     ptrdiff_t index;
 
     if (map == NULL || map->kind != BENCH_KEYS_CSTR || key == NULL ||
-        value == NULL) {
+        value == NULL || map->raw.cstr == NULL) {
         return false;
     }
     index = shgeti(map->raw.cstr, (char *)key);
@@ -183,6 +184,7 @@ static bool stb_ds_bench_remove_cstr(void *raw_map, const char *key)
     stb_ds_bench_map *map = stb_ds_bench_cast(raw_map);
 
     return map != NULL && map->kind == BENCH_KEYS_CSTR && key != NULL &&
+           map->raw.cstr != NULL &&
            shdel(map->raw.cstr, (char *)key) != 0;
 }
 

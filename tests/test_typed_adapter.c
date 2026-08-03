@@ -3,15 +3,70 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 static void assert_stats_equal(bench_alloc_stats actual,
                                bench_alloc_stats expected)
 {
+    if (actual.current_bytes != expected.current_bytes ||
+        actual.peak_bytes != expected.peak_bytes ||
+        actual.allocations != expected.allocations ||
+        actual.frees != expected.frees) {
+        fprintf(stderr,
+                "allocation stats changed: %zu/%zu/%zu/%zu -> "
+                "%zu/%zu/%zu/%zu\n",
+                expected.current_bytes, expected.peak_bytes,
+                expected.allocations, expected.frees,
+                actual.current_bytes, actual.peak_bytes,
+                actual.allocations, actual.frees);
+    }
     assert(actual.current_bytes == expected.current_bytes);
     assert(actual.peak_bytes == expected.peak_bytes);
     assert(actual.allocations == expected.allocations);
     assert(actual.frees == expected.frees);
+}
+
+static void test_empty_lookup_no_allocation(bench_key_kind kind)
+{
+    const uint64_t missing_u64 = UINT64_C(0x123456789abcdef0);
+    const char missing_cstr[] = "empty-map-miss";
+    bench_alloc_stats before;
+    bench_alloc_stats ended;
+    uint64_t checksum = UINT64_MAX;
+    uint64_t value = UINT64_MAX;
+    size_t seen = SIZE_MAX;
+    void *map;
+
+    bench_alloc_reset();
+    bench_alloc_begin();
+    map = bench_adapter.create(kind, 0u);
+    assert(map != NULL);
+    before = bench_alloc_snapshot();
+    if (kind == BENCH_KEYS_U64) {
+        assert(!bench_adapter.remove_u64(map, missing_u64));
+        assert_stats_equal(bench_alloc_snapshot(), before);
+        assert(!bench_adapter.get_u64(map, missing_u64, &value));
+        assert(value == UINT64_MAX);
+        assert_stats_equal(bench_alloc_snapshot(), before);
+        assert(!bench_adapter.get_u64(map, missing_u64, &value));
+    } else {
+        assert(!bench_adapter.remove_cstr(map, missing_cstr));
+        assert_stats_equal(bench_alloc_snapshot(), before);
+        assert(!bench_adapter.get_cstr(map, missing_cstr, &value));
+        assert(value == UINT64_MAX);
+        assert_stats_equal(bench_alloc_snapshot(), before);
+        assert(!bench_adapter.get_cstr(map, missing_cstr, &value));
+    }
+    assert(value == UINT64_MAX);
+    assert(bench_adapter.iterate(map, &checksum, &seen));
+    assert(checksum == 0u);
+    assert(seen == 0u);
+    assert(bench_adapter.size(map) == 0u);
+    assert_stats_equal(bench_alloc_snapshot(), before);
+    bench_adapter.destroy(map);
+    ended = bench_alloc_end();
+    assert(ended.current_bytes == 0u);
 }
 
 static void test_cstr_content_and_lifetime(void)
@@ -106,6 +161,8 @@ static void test_invalid_sizes(void)
 
 int main(void)
 {
+    test_empty_lookup_no_allocation(BENCH_KEYS_U64);
+    test_empty_lookup_no_allocation(BENCH_KEYS_CSTR);
     test_cstr_content_and_lifetime();
     test_u64_contract();
     test_invalid_sizes();
