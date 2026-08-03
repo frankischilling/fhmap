@@ -3,6 +3,7 @@
 BEGIN {
     FS = "\t"
     OFS = "\t"
+    uint64_max = "18446744073709551615"
 
     map_count = split("fhmap cc verstable khashl khash mlib stc stb_ds uthash tidwall pottery", map_order, " ")
     kind_count = split("u64 cstr", kind_order, " ")
@@ -28,6 +29,10 @@ BEGIN {
         metadata_known["lock_" map_order[i]] = 1
 }
 
+index($0, "\r") != 0 {
+    fail("carriage return in input")
+}
+
 $1 == "meta" {
     if (NF != 3 || !($2 in metadata_known) || $3 == "")
         fail("invalid metadata row")
@@ -37,14 +42,13 @@ $1 == "meta" {
     if (($2 == "commit" || $2 ~ /^lock_/) &&
         (length($3) != 40 || $3 !~ /^[0-9a-f]+$/))
         fail("invalid commit metadata")
-    if ($2 == "counts" &&
-        ($3 !~ /^[0-9]+(,[0-9]+)*$/ || $3 ~ /(^|,)0(,|$)/))
+    if ($2 == "counts" && !valid_count_list($3))
         fail("invalid count metadata")
-    if ($2 == "samples" && !positive_integer($3))
+    if ($2 == "samples" && !canonical_positive_uint64($3))
         fail("invalid sample metadata")
-    if ($2 == "seed" && !unsigned_integer($3))
+    if ($2 == "seed" && !canonical_uint64($3))
         fail("invalid seed metadata")
-    if ($2 == "cpu_pin" && $3 != "none" && !unsigned_integer($3))
+    if ($2 == "cpu_pin" && $3 != "none" && !canonical_uint64($3))
         fail("invalid CPU metadata")
     metadata_value[$2] = $3
     ++metadata_rows
@@ -52,7 +56,8 @@ $1 == "meta" {
 }
 
 $1 == "rank" {
-    if (NF != 7 || !positive_integer($2) || !($3 in kind_known) ||
+    if (NF != 7 || !canonical_positive_uint64($2) ||
+        !($3 in kind_known) ||
         !($4 in workload_known) || !($5 in map_known) ||
         !positive_metric($6) || !positive_metric($7)) {
         fail("invalid rank row")
@@ -75,19 +80,18 @@ $1 == "geomean" {
 }
 
 {
-    if (index($0, "\r") != 0) fail("carriage return in input")
     if (NF != 15 || $1 != "result") fail("invalid result schema")
     if (!($2 in map_known)) fail("unexpected adapter: " $2)
     if (!($3 in kind_known)) fail("unexpected key kind: " $3)
     if (!($4 in workload_known)) fail("unexpected workload: " $4)
-    if (!canonical_positive_integer($5) ||
-        !canonical_positive_integer($6))
+    if (!canonical_positive_uint64($5) ||
+        !canonical_positive_uint64($6))
         fail("invalid count or sample count")
     if (!positive_metric($7)) fail("invalid primary metric")
     if (!nonnegative_metric($8)) fail("invalid dispersion metric")
     if ($9 != "ok") fail("non-ok primary row")
     for (i = 10; i <= 15; ++i) {
-        if (!unsigned_integer($i)) fail("invalid result accounting")
+        if (!canonical_uint64($i)) fail("invalid result accounting")
     }
 
     if (!count_seen[$5]++) {
@@ -197,16 +201,25 @@ function sort_counts(    i, j, value) {
     }
 }
 
-function unsigned_integer(value) {
-    return value ~ /^[0-9]+$/ && length(value) <= 20
+function canonical_uint64(value) {
+    if (value !~ /^(0|[1-9][0-9]*)$/) return 0
+    if (length(value) < length(uint64_max)) return 1
+    if (length(value) > length(uint64_max)) return 0
+    return !decimal_greater(value, uint64_max)
 }
 
-function positive_integer(value) {
-    return unsigned_integer(value) && (value + 0) > 0
+function canonical_positive_uint64(value) {
+    return canonical_uint64(value) && value != "0"
 }
 
-function canonical_positive_integer(value) {
-    return positive_integer(value) && substr(value, 1, 1) != "0"
+function valid_count_list(value, count, parts, seen, i) {
+    if (value !~ /^[0-9]+(,[0-9]+)*$/) return 0
+    count = split(value, parts, ",")
+    for (i = 1; i <= count; ++i) {
+        if (!canonical_positive_uint64(parts[i]) || seen[parts[i]]++)
+            return 0
+    }
+    return count > 0
 }
 
 function decimal_greater(left, right) {

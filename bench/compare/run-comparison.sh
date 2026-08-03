@@ -8,9 +8,11 @@ build_dir=$repo_root/build/bench-compare
 lock_file=$script_dir/competitors.lock
 summarizer=$script_dir/summarize.awk
 maps='fhmap cc verstable khashl khash mlib stc stb_ds uthash tidwall pottery'
-counts=${FHMAP_BENCH_COUNTS:-32,4096,262144,1048576}
-samples=${FHMAP_BENCH_SAMPLES:-9}
-seed=${FHMAP_BENCH_SEED:-7640891576956012809}
+uint64_max=18446744073709551615
+counts=${FHMAP_BENCH_COUNTS-32,4096,262144,1048576}
+samples=${FHMAP_BENCH_SAMPLES-9}
+seed=${FHMAP_BENCH_SEED-7640891576956012809}
+pin_cpu=${FHMAP_BENCH_CPU-0}
 bench_cc=${FHMAP_BENCH_CC:-${CC:-cc}}
 bench_flags=${FHMAP_BENCH_CFLAGS:--std=c11 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -O3 -DNDEBUG -march=native}
 
@@ -20,20 +22,36 @@ fail()
     exit 1
 }
 
+is_canonical_uint64()
+{
+    LC_ALL=C awk -v value="$1" -v maximum="$uint64_max" '
+        BEGIN {
+            if (value !~ /^(0|[1-9][0-9]*)$/) exit 1
+            if (length(value) < length(maximum)) exit 0
+            if (length(value) > length(maximum)) exit 1
+            exit (("x" value) > ("x" maximum))
+        }
+    ' </dev/null
+}
+
+is_canonical_positive_uint64()
+{
+    is_canonical_uint64 "$1" && test "$1" != 0
+}
+
 case $counts in
     ''|*[!0-9,]*|,*|*,|*,,*) fail 'invalid FHMAP_BENCH_COUNTS' ;;
 esac
-case $samples in
-    ''|*[!0-9]*|0) fail 'invalid FHMAP_BENCH_SAMPLES' ;;
-esac
-case $seed in
-    ''|*[!0-9]*) fail 'invalid FHMAP_BENCH_SEED' ;;
-esac
+is_canonical_positive_uint64 "$samples" ||
+    fail 'invalid FHMAP_BENCH_SAMPLES'
+is_canonical_uint64 "$seed" || fail 'invalid FHMAP_BENCH_SEED'
+is_canonical_uint64 "$pin_cpu" || fail 'invalid FHMAP_BENCH_CPU'
 case $bench_cc in
     ''|*[!A-Za-z0-9_./+-]*) fail 'invalid benchmark compiler command' ;;
 esac
 
 remaining_counts=$counts
+seen_counts=,
 while :
 do
     case $remaining_counts in
@@ -46,9 +64,12 @@ do
             remaining_counts=
             ;;
     esac
-    case $count in
-        ''|*[!0-9]*|0) fail 'invalid FHMAP_BENCH_COUNTS' ;;
+    is_canonical_positive_uint64 "$count" ||
+        fail 'invalid FHMAP_BENCH_COUNTS'
+    case $seen_counts in
+        *,"$count",*) fail 'duplicate FHMAP_BENCH_COUNTS entry' ;;
     esac
+    seen_counts=$seen_counts$count,
     test -n "$remaining_counts" || break
 done
 
@@ -61,10 +82,6 @@ do
     test -x "$build_dir/$map" || fail "adapter binary not found: $map"
 done
 
-pin_cpu=${FHMAP_BENCH_CPU:-0}
-case $pin_cpu in
-    ''|*[!0-9]*) fail 'invalid FHMAP_BENCH_CPU' ;;
-esac
 cpu_pin=none
 if command -v taskset >/dev/null 2>&1 &&
         taskset -c "$pin_cpu" true >/dev/null 2>&1; then

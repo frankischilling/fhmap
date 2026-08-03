@@ -257,6 +257,56 @@ expect_summary_failure()
 
 expect_summary_failure "$failed_bench_fixture"
 
+max_uint64=18446744073709551615
+overflow_uint64=18446744073709551616
+for integer_field in 5 6 10 11 12 13 14 15
+do
+    max_integer_fixture=$fetch_test_dir/max-integer-$integer_field.tsv
+    awk -F '\t' -v field="$integer_field" -v value="$max_uint64" '
+        BEGIN { OFS = "\t" }
+        { $field = value; print }
+    ' "$valid_bench_fixture" >"$max_integer_fixture"
+    awk -f "$summarizer" "$max_integer_fixture" >"$summary_file"
+
+    overflow_integer_fixture=$fetch_test_dir/overflow-integer-$integer_field.tsv
+    awk -F '\t' -v field="$integer_field" -v value="$overflow_uint64" '
+        BEGIN { OFS = "\t" }
+        { $field = value; print }
+    ' "$valid_bench_fixture" >"$overflow_integer_fixture"
+    expect_summary_failure "$overflow_integer_fixture"
+
+    leading_zero_fixture=$fetch_test_dir/leading-zero-$integer_field.tsv
+    awk -F '\t' -v field="$integer_field" '
+        BEGIN { OFS = "\t" }
+        { $field = "0" $field; print }
+    ' "$valid_bench_fixture" >"$leading_zero_fixture"
+    expect_summary_failure "$leading_zero_fixture"
+done
+
+for zero_field in 10 11 12 13 14 15
+do
+    zero_integer_fixture=$fetch_test_dir/zero-integer-$zero_field.tsv
+    awk -F '\t' -v field="$zero_field" 'BEGIN { OFS = "\t" }
+        { $field = "0"; print }
+    ' "$valid_bench_fixture" >"$zero_integer_fixture"
+    awk -f "$summarizer" "$zero_integer_fixture" >"$summary_file"
+done
+
+nonpositive_metric=$fetch_test_dir/nonpositive-metric.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" } NR == 1 { $7 = "0.000" } { print }' \
+    "$valid_bench_fixture" >"$nonpositive_metric"
+expect_summary_failure "$nonpositive_metric"
+
+unexpected_adapter=$fetch_test_dir/unexpected-adapter.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" } NR == 1 { $2 = "unknown" } { print }' \
+    "$valid_bench_fixture" >"$unexpected_adapter"
+expect_summary_failure "$unexpected_adapter"
+
+result_with_cr=$fetch_test_dir/result-with-cr.tsv
+awk 'NR == 1 { printf "%s\r\n", $0; next } { print }' \
+    "$valid_bench_fixture" >"$result_with_cr"
+expect_summary_failure "$result_with_cr"
+
 missing_adapter=$fetch_test_dir/missing-adapter.tsv
 awk -F '\t' '$2 != "pottery"' "$valid_bench_fixture" >"$missing_adapter"
 expect_summary_failure "$missing_adapter"
@@ -884,7 +934,7 @@ comparison_cwd=$fetch_test_dir/comparison-cwd
 mkdir "$comparison_cwd"
 (
     cd "$comparison_cwd"
-    FHMAP_BENCH_COUNTS=1 FHMAP_BENCH_SAMPLES=1 \
+    FHMAP_BENCH_COUNTS=32,4096 FHMAP_BENCH_SAMPLES=3 \
         "$comparison_runner" >"$comparison_report"
 )
 for metadata_name in uname cpu_model compiler compiler_flags branch commit \
@@ -894,15 +944,28 @@ do
         '$1 == "meta" && $2 == name { count++ } END { print count + 0 }' \
         "$comparison_report")" -eq 1
 done
+test "$(awk -F '\t' '$1 == "meta" { count++ }
+    END { print count + 0 }' "$comparison_report")" -eq 21
 test "$(awk -F '\t' '$1 == "meta" && $2 ~ /^lock_/ { count++ } \
     END { print count + 0 }' "$comparison_report")" -eq 10
-test "$(grep -c '^result' "$comparison_report")" -eq 176
-test "$(grep -c '^rank' "$comparison_report")" -eq 176
+test "$(grep -c '^result' "$comparison_report")" -eq 352
+test "$(grep -c '^rank' "$comparison_report")" -eq 352
 test "$(grep -c '^geomean' "$comparison_report")" -eq 11
-test "$(awk -F '\t' '$1 == "result" && $5 == 1 && $6 == 1 { count++ } \
-    END { print count + 0 }' "$comparison_report")" -eq 176
+for comparison_count in 32 4096
+do
+    test "$(awk -F '\t' -v count="$comparison_count" '
+        $1 == "result" && $5 == count && $6 == 3 && $9 == "ok" {
+            rows++
+        }
+        END { print rows + 0 }
+    ' "$comparison_report")" -eq 176
+    test "$(awk -F '\t' -v count="$comparison_count" '
+        $1 == "rank" && $2 == count { rows++ }
+        END { print rows + 0 }
+    ' "$comparison_report")" -eq 176
+done
 awk -f "$summarizer" "$comparison_report" >"$summary_file"
-test "$(grep -c '^rank' "$summary_file")" -eq 176
+test "$(grep -c '^rank' "$summary_file")" -eq 352
 test "$(grep -c '^geomean' "$summary_file")" -eq 11
 
 duplicate_rank=$fetch_test_dir/duplicate-rank.tsv
@@ -951,6 +1014,105 @@ awk -F '\t' '$1 == "meta" && $2 == "uname" { print; exit }' \
     "$comparison_report" >>"$duplicate_metadata"
 expect_summary_failure "$duplicate_metadata"
 
+partial_metadata=$fetch_test_dir/partial-metadata.tsv
+awk -F '\t' '!($1 == "meta" && $2 == "uname")' "$comparison_report" \
+    >"$partial_metadata"
+expect_summary_failure "$partial_metadata"
+
+metadata_with_cr=$fetch_test_dir/metadata-with-cr.tsv
+awk -F '\t' '$1 == "meta" && $2 == "uname" && !changed {
+        printf "%s\r\n", $0
+        changed = 1
+        next
+    }
+    { print }
+' "$comparison_report" >"$metadata_with_cr"
+expect_summary_failure "$metadata_with_cr"
+
+metadata_bad_fields=$fetch_test_dir/metadata-bad-fields.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" }
+    $1 == "meta" && $2 == "uname" { print $0, "extra"; next }
+    { print }
+' "$comparison_report" >"$metadata_bad_fields"
+expect_summary_failure "$metadata_bad_fields"
+
+max_count_metadata=$fetch_test_dir/max-count-metadata.tsv
+awk -F '\t' -v maximum="$max_uint64" 'BEGIN { OFS = "\t" }
+    $1 == "meta" && $2 == "counts" { $3 = maximum; print; next }
+    $1 == "result" && $5 == 32 { $5 = maximum; print; next }
+    $1 == "result" || $1 == "rank" || $1 == "geomean" { next }
+    { print }
+' "$comparison_report" >"$max_count_metadata"
+awk -f "$summarizer" "$max_count_metadata" >"$summary_file"
+
+max_sample_metadata=$fetch_test_dir/max-sample-metadata.tsv
+awk -F '\t' -v maximum="$max_uint64" 'BEGIN { OFS = "\t" }
+    $1 == "meta" && $2 == "samples" { $3 = maximum }
+    $1 == "result" { $6 = maximum }
+    $1 == "rank" || $1 == "geomean" { next }
+    { print }
+' "$comparison_report" >"$max_sample_metadata"
+awk -f "$summarizer" "$max_sample_metadata" >"$summary_file"
+
+for metadata_name in seed cpu_pin
+do
+    max_metadata=$fetch_test_dir/max-metadata-$metadata_name.tsv
+    awk -F '\t' -v name="$metadata_name" -v value="$max_uint64" '
+        BEGIN { OFS = "\t" }
+        $1 == "meta" && $2 == name { $3 = value }
+        { print }
+    ' "$comparison_report" >"$max_metadata"
+    awk -f "$summarizer" "$max_metadata" >"$summary_file"
+done
+
+for metadata_name in counts samples seed cpu_pin
+do
+    overflow_metadata=$fetch_test_dir/overflow-metadata-$metadata_name.tsv
+    awk -F '\t' -v name="$metadata_name" -v value="$overflow_uint64" '
+        BEGIN { OFS = "\t" }
+        $1 == "meta" && $2 == name { $3 = value }
+        { print }
+    ' "$comparison_report" >"$overflow_metadata"
+    expect_summary_failure "$overflow_metadata"
+
+    leading_metadata=$fetch_test_dir/leading-metadata-$metadata_name.tsv
+    awk -F '\t' -v name="$metadata_name" 'BEGIN { OFS = "\t" }
+        $1 == "meta" && $2 == name { $3 = "0" $3 }
+        { print }
+    ' "$comparison_report" >"$leading_metadata"
+    expect_summary_failure "$leading_metadata"
+done
+
+rank_with_cr=$fetch_test_dir/rank-with-cr.tsv
+awk -F '\t' '$1 == "rank" && !changed {
+        printf "%s\r\n", $0
+        changed = 1
+        next
+    }
+    { print }
+' "$comparison_report" >"$rank_with_cr"
+expect_summary_failure "$rank_with_cr"
+
+geomean_with_cr=$fetch_test_dir/geomean-with-cr.tsv
+awk -F '\t' '$1 == "geomean" && !changed {
+        printf "%s\r\n", $0
+        changed = 1
+        next
+    }
+    { print }
+' "$comparison_report" >"$geomean_with_cr"
+expect_summary_failure "$geomean_with_cr"
+
+partial_rank=$fetch_test_dir/partial-rank.tsv
+awk -F '\t' '$1 == "rank" && !removed { removed = 1; next } { print }' \
+    "$comparison_report" >"$partial_rank"
+expect_summary_failure "$partial_rank"
+
+partial_geomean=$fetch_test_dir/partial-geomean.tsv
+awk -F '\t' '$1 == "geomean" && !removed { removed = 1; next } { print }' \
+    "$comparison_report" >"$partial_geomean"
+expect_summary_failure "$partial_geomean"
+
 if command -v taskset >/dev/null 2>&1 && taskset -c 0 true >/dev/null 2>&1; then
     awk -F '\t' '$1 == "meta" && $2 == "cpu_pin" && $3 == 0 { found++ }
         END { if (found != 1) exit 1 }' "$comparison_report"
@@ -960,13 +1122,30 @@ else
         } END { if (found != 1) exit 1 }' "$comparison_report"
 fi
 
-if FHMAP_BENCH_COUNTS='1,bad' "$comparison_runner" \
-        >"$stdout_file" 2>"$stderr_file"; then
-    printf 'comparison runner accepted an invalid count list\n' >&2
-    exit 1
-fi
-test ! -s "$stdout_file"
-test -s "$stderr_file"
+expect_runner_failure()
+{
+    expect_command_failure env "$@" "$comparison_runner"
+    test ! -s "$stdout_file"
+}
+
+expect_runner_failure FHMAP_BENCH_COUNTS=1,bad
+expect_runner_failure FHMAP_BENCH_COUNTS="$overflow_uint64"
+expect_runner_failure FHMAP_BENCH_COUNTS=00
+expect_runner_failure FHMAP_BENCH_COUNTS="$max_uint64,$max_uint64"
+expect_runner_failure FHMAP_BENCH_COUNTS=1 \
+    FHMAP_BENCH_SAMPLES=00
+expect_runner_failure FHMAP_BENCH_COUNTS=1 \
+    FHMAP_BENCH_SAMPLES="$overflow_uint64"
+expect_runner_failure FHMAP_BENCH_COUNTS=1 FHMAP_BENCH_SAMPLES=1 \
+    FHMAP_BENCH_SEED=018446744073709551616
+expect_runner_failure FHMAP_BENCH_COUNTS=1 FHMAP_BENCH_SAMPLES=1 \
+    FHMAP_BENCH_SEED="$overflow_uint64"
+expect_runner_failure FHMAP_BENCH_COUNTS=1 FHMAP_BENCH_SAMPLES=1 \
+    FHMAP_BENCH_CPU=018446744073709551615
+expect_runner_failure FHMAP_BENCH_COUNTS=1 FHMAP_BENCH_SAMPLES=1 \
+    FHMAP_BENCH_CPU="$overflow_uint64"
+expect_runner_failure FHMAP_BENCH_COUNTS=1 FHMAP_BENCH_SAMPLES=1 \
+    FHMAP_BENCH_CPU=1048575
 
 test -n "$pottery_boundary_output"
 printf '%s\n' "$pottery_boundary_output" | awk -F '\t' '
