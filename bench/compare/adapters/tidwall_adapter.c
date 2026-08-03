@@ -77,14 +77,25 @@ static int tidwall_cstr_compare(const void *left, const void *right,
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wfloat-conversion"
 #endif
+static double tidwall_clamp_load_factor(double factor, double default_factor)
+{
+    return factor != factor ? default_factor
+                            : factor < 0.50 ? 0.50
+                                            : factor > 0.95 ? 0.95 : factor;
+}
+
 static bool tidwall_entry_threshold(size_t buckets, size_t *threshold)
 {
+    uint8_t loadfactor;
+
     if (threshold == NULL || buckets == 0u ||
         (buckets & (buckets - 1u)) != 0u) {
         return false;
     }
-    *threshold = (size_t)(buckets * (60u / 100.0));
+    loadfactor = tidwall_clamp_load_factor(0.60, 0.60) * 100;
+    *threshold = buckets * (loadfactor / 100.0);
     return true;
 }
 #if defined(__GNUC__)

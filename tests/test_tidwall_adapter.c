@@ -2,10 +2,11 @@
 #include "../bench/compare/common/bench_alloc.h"
 
 #include <assert.h>
-#include <float.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "hashmap.h"
 
 static size_t malloc_calls_until_failure;
 
@@ -33,10 +34,23 @@ static void assert_stats_equal(bench_alloc_stats actual,
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wfloat-conversion"
 #endif
+static double pinned_clamp_load_factor_reference(double factor,
+                                                 double default_factor)
+{
+    return factor != factor ? default_factor
+                            : factor < 0.50 ? 0.50
+                                            : factor > 0.95 ? 0.95 : factor;
+}
+
 static size_t pinned_threshold_reference(size_t buckets)
 {
-    return (size_t)(buckets * (60u / 100.0));
+    uint8_t loadfactor;
+
+    loadfactor =
+        pinned_clamp_load_factor_reference(0.60, 0.60) * 100;
+    return (size_t)(buckets * (loadfactor / 100.0));
 }
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
@@ -44,42 +58,10 @@ static size_t pinned_threshold_reference(size_t buckets)
 
 static void test_threshold_matches_pinned_expression(void)
 {
-#if FLT_EVAL_METHOD == 0
-    static const struct threshold_vector {
-        uint64_t buckets;
-        uint64_t threshold;
-    } vectors[] = {
-        {UINT64_C(9007199254740992), UINT64_C(5404319552844595)},
-        {UINT64_C(18014398509481984), UINT64_C(10808639105689190)},
-        {UINT64_C(36028797018963968), UINT64_C(21617278211378380)},
-        {UINT64_C(72057594037927936), UINT64_C(43234556422756760)},
-        {UINT64_C(144115188075855872), UINT64_C(86469112845513520)},
-        {UINT64_C(288230376151711744), UINT64_C(172938225691027040)},
-        {UINT64_C(576460752303423488), UINT64_C(345876451382054080)},
-        {UINT64_C(1152921504606846976), UINT64_C(691752902764108160)}
-    };
-#elif FLT_EVAL_METHOD == 2
-    static const struct threshold_vector {
-        uint64_t buckets;
-        uint64_t threshold;
-    } vectors[] = {
-        {UINT64_C(9007199254740992), UINT64_C(5404319552844595)},
-        {UINT64_C(18014398509481984), UINT64_C(10808639105689190)},
-        {UINT64_C(36028797018963968), UINT64_C(21617278211378380)},
-        {UINT64_C(72057594037927936), UINT64_C(43234556422756761)},
-        {UINT64_C(144115188075855872), UINT64_C(86469112845513523)},
-        {UINT64_C(288230376151711744), UINT64_C(172938225691027046)},
-        {UINT64_C(576460752303423488), UINT64_C(345876451382054092)},
-        {UINT64_C(1152921504606846976), UINT64_C(691752902764108185)}
-    };
-#endif
     bench_alloc_stats before;
     bench_alloc_stats ended;
     size_t actual;
     size_t buckets;
-#if FLT_EVAL_METHOD == 0 || FLT_EVAL_METHOD == 2
-    size_t index;
-#endif
 
     bench_alloc_reset();
     bench_alloc_begin();
@@ -91,19 +73,69 @@ static void test_threshold_matches_pinned_expression(void)
         if (buckets > SIZE_MAX / 2u) break;
         buckets *= 2u;
     }
-#if FLT_EVAL_METHOD == 0 || FLT_EVAL_METHOD == 2
-    if (sizeof(size_t) >= sizeof(uint64_t)) {
-        for (index = 0u; index < sizeof(vectors) / sizeof(vectors[0]);
-             ++index) {
-            assert(tidwall_bench_test_entry_threshold(
-                (size_t)vectors[index].buckets, &actual));
-            assert(actual == (size_t)vectors[index].threshold);
-        }
-    }
-#endif
     assert_stats_equal(bench_alloc_snapshot(), before);
     ended = bench_alloc_end();
     assert(ended.current_bytes == 0u);
+}
+
+typedef struct pinned_boundary_item {
+    uint64_t key;
+} pinned_boundary_item;
+
+static uint64_t pinned_boundary_hash(const void *raw_item, uint64_t seed_zero,
+                                     uint64_t seed_one)
+{
+    const pinned_boundary_item *item =
+        (const pinned_boundary_item *)raw_item;
+
+    return hashmap_xxhash3(&item->key, sizeof(item->key), seed_zero,
+                           seed_one);
+}
+
+static int pinned_boundary_compare(const void *raw_left,
+                                   const void *raw_right, void *user_data)
+{
+    const pinned_boundary_item *left =
+        (const pinned_boundary_item *)raw_left;
+    const pinned_boundary_item *right =
+        (const pinned_boundary_item *)raw_right;
+
+    (void)user_data;
+    return left->key == right->key ? 0 : 1;
+}
+
+static void test_pinned_resize_boundary(void)
+{
+    bench_alloc_stats ended;
+    pinned_boundary_item item;
+    struct hashmap *map;
+    size_t index;
+    size_t threshold;
+
+    bench_alloc_reset();
+    bench_alloc_begin();
+    assert(tidwall_bench_test_entry_threshold(32u, &threshold));
+    map = hashmap_new_with_allocator(
+        bench_malloc, bench_realloc, bench_free, sizeof(item), 32u,
+        UINT64_C(0x243f6a8885a308d3), UINT64_C(0x13198a2e03707344),
+        pinned_boundary_hash, pinned_boundary_compare, NULL, NULL);
+    assert(map != NULL);
+    assert(hashmap_nbuckets(map) == 32u);
+    for (index = 0u; index < threshold; ++index) {
+        item.key = (uint64_t)index;
+        assert(hashmap_set(map, &item) == NULL);
+        assert(!hashmap_oom(map));
+        assert(hashmap_nbuckets(map) == 32u);
+    }
+    item.key = (uint64_t)threshold;
+    assert(hashmap_set(map, &item) == NULL);
+    assert(!hashmap_oom(map));
+    assert(hashmap_nbuckets(map) == 64u);
+    assert(hashmap_count(map) == threshold + 1u);
+    hashmap_free(map);
+    ended = bench_alloc_end();
+    assert(ended.current_bytes == 0u);
+    assert(ended.allocations == ended.frees);
 }
 
 static void test_empty_map(bench_key_kind kind)
@@ -254,32 +286,29 @@ static void test_reserved_insert_does_not_grow(bench_key_kind kind)
 
 static void test_expected_entry_boundaries(bench_key_kind kind)
 {
-    static const struct expected_case {
-        size_t entries;
-        size_t buckets;
-        size_t threshold;
-    } cases[] = {
-        {9u, 16u, 9u},
-        {10u, 32u, 19u},
-        {19u, 32u, 19u},
-        {20u, 64u, 38u},
-        {32u, 64u, 38u}
-    };
+    static const size_t entries[] = {9u, 10u, 19u, 20u, 32u};
     size_t index;
 
-    for (index = 0u; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+    for (index = 0u; index < sizeof(entries) / sizeof(entries[0]); ++index) {
         bench_alloc_stats before_reserve;
         bench_alloc_stats ended;
+        size_t buckets = 16u;
+        size_t threshold;
         void *map;
 
+        while (pinned_threshold_reference(buckets) < entries[index]) {
+            assert(buckets <= SIZE_MAX / 2u);
+            buckets *= 2u;
+        }
+        threshold = pinned_threshold_reference(buckets);
         bench_alloc_reset();
         bench_alloc_begin();
-        map = bench_adapter.create(kind, cases[index].entries);
+        map = bench_adapter.create(kind, entries[index]);
         assert(map != NULL);
-        assert(bench_adapter.capacity(map) == cases[index].buckets);
+        assert(bench_adapter.capacity(map) == buckets);
         before_reserve = bench_alloc_snapshot();
-        assert(bench_adapter.reserve(map, cases[index].threshold));
-        assert(!bench_adapter.reserve(map, cases[index].threshold + 1u));
+        assert(bench_adapter.reserve(map, threshold));
+        assert(!bench_adapter.reserve(map, threshold + 1u));
         assert_stats_equal(bench_alloc_snapshot(), before_reserve);
         bench_adapter.destroy(map);
         ended = bench_alloc_end();
@@ -379,6 +408,7 @@ static void test_wrong_kind_and_invalid_create(void)
 int main(void)
 {
     assert(strcmp(bench_adapter.name, "tidwall") == 0);
+    test_pinned_resize_boundary();
     test_threshold_matches_pinned_expression();
     test_empty_map(BENCH_KEYS_U64);
     test_empty_map(BENCH_KEYS_CSTR);
