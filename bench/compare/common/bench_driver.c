@@ -16,8 +16,16 @@ typedef enum bench_workload {
     BENCH_LOOKUP_MISS,
     BENCH_ERASE,
     BENCH_ITERATE,
+    BENCH_CHURN,
     BENCH_WORKLOAD_COUNT
 } bench_workload;
+
+typedef enum bench_churn_operation {
+    BENCH_CHURN_HIT,
+    BENCH_CHURN_MISS,
+    BENCH_CHURN_ERASE,
+    BENCH_CHURN_INSERT
+} bench_churn_operation;
 
 typedef struct bench_options {
     size_t count;
@@ -41,6 +49,7 @@ typedef struct bench_prepared_values {
     uint64_t updated_checksum;
     uint64_t key_checksum;
     uint64_t miss_checksum;
+    uint64_t churn_checksum;
 } bench_prepared_values;
 
 typedef struct bench_operation_result {
@@ -58,7 +67,8 @@ static const char *const bench_workload_names[BENCH_WORKLOAD_COUNT] = {
     "lookup_hit",
     "lookup_miss",
     "erase",
-    "iterate"
+    "iterate",
+    "churn"
 };
 
 static const double bench_min_sample_seconds = 0.010;
@@ -66,6 +76,30 @@ enum {
     BENCH_MAX_SAMPLE_REPETITIONS = 1000000,
     BENCH_MIN_TIMED_INTERVAL_OPERATIONS = 256
 };
+
+static size_t bench_churn_live_count(size_t count)
+{
+    size_t live = (count / 10u) * 7u + ((count % 10u) * 7u) / 10u;
+
+    return live == 0u ? 1u : live;
+}
+
+static bool bench_workload_operation_count(size_t count,
+                                           bench_workload workload,
+                                           size_t *result)
+{
+    size_t blocks;
+
+    if (result == NULL || count == 0u) return false;
+    if (workload != BENCH_CHURN) {
+        *result = count;
+        return true;
+    }
+    blocks = count / 20u + (size_t)(count % 20u != 0u);
+    if (blocks > SIZE_MAX / 20u) return false;
+    *result = blocks * 20u;
+    return true;
+}
 
 static const char *bench_key_kind_name(bench_key_kind kind)
 {
@@ -217,6 +251,10 @@ static bool bench_prepared_values_init(bench_prepared_values *values,
                                                    data->u64_keys[index]);
         prepared.miss_checksum = bench_checksum_add(prepared.miss_checksum,
                                                     data->u64_misses[index]);
+        if (index < bench_churn_live_count(data->count)) {
+            prepared.churn_checksum = bench_checksum_add(
+                prepared.churn_checksum, prepared.original[index]);
+        }
     }
     *values = prepared;
     return true;
@@ -278,13 +316,14 @@ static bool bench_wrong_kind_is_safe(void *map, bench_key_kind kind)
     return bench_adapter.size(map) == 0u;
 }
 
-static bool bench_populate(void *map, bench_key_kind kind,
-                           const bench_dataset *data,
-                           const bench_prepared_values *values)
+static bool bench_populate_count(void *map, bench_key_kind kind,
+                                 const bench_dataset *data,
+                                 const bench_prepared_values *values,
+                                 size_t count)
 {
     size_t index;
 
-    for (index = 0; index < data->count; ++index) {
+    for (index = 0; index < count; ++index) {
         bool inserted = false;
 
         if (!bench_put_item(map, kind, data, index, values->original[index],
@@ -293,7 +332,14 @@ static bool bench_populate(void *map, bench_key_kind kind,
             return false;
         }
     }
-    return bench_adapter.size(map) == data->count;
+    return bench_adapter.size(map) == count;
+}
+
+static bool bench_populate(void *map, bench_key_kind kind,
+                           const bench_dataset *data,
+                           const bench_prepared_values *values)
+{
+    return bench_populate_count(map, kind, data, values, data->count);
 }
 
 static bool bench_validate_contents(void *map, bench_key_kind kind,
@@ -327,6 +373,33 @@ static bool bench_validate_contents(void *map, bench_key_kind kind,
                                  : values->original_checksum));
 }
 
+static bool bench_validate_churn_contents(
+    void *map, bench_key_kind kind, const bench_dataset *data,
+    const bench_prepared_values *values)
+{
+    const size_t live_count = bench_churn_live_count(data->count);
+    uint64_t iteration_checksum = 0;
+    size_t seen = 0;
+    size_t index;
+
+    if (bench_adapter.size(map) != live_count) return false;
+    for (index = 0; index < data->count; ++index) {
+        uint64_t value = 0;
+        const bool found = bench_get_item(map, kind, data, index, false,
+                                          &value);
+
+        if (index < live_count) {
+            if (!found || value != values->original[index]) return false;
+        } else if (found) {
+            return false;
+        }
+        if (bench_get_item(map, kind, data, index, true, &value)) return false;
+    }
+    if (!bench_adapter.iterate(map, &iteration_checksum, &seen)) return false;
+    return seen == live_count &&
+           iteration_checksum == values->churn_checksum;
+}
+
 static uint64_t bench_expected_checksum(const bench_prepared_values *values,
                                         bench_workload workload)
 {
@@ -342,10 +415,84 @@ static uint64_t bench_expected_checksum(const bench_prepared_values *values,
         case BENCH_LOOKUP_HIT:
         case BENCH_ITERATE:
             return values->original_checksum;
+        case BENCH_CHURN:
+            return values->churn_checksum;
         case BENCH_WORKLOAD_COUNT:
             break;
     }
     return 0;
+}
+
+static void bench_apply_churn(void *map, bench_key_kind kind,
+                              const bench_dataset *data,
+                              const bench_prepared_values *values,
+                              bench_operation_result *result)
+{
+    static const bench_churn_operation operations[20] = {
+        BENCH_CHURN_HIT, BENCH_CHURN_HIT, BENCH_CHURN_MISS,
+        BENCH_CHURN_HIT, BENCH_CHURN_ERASE, BENCH_CHURN_INSERT,
+        BENCH_CHURN_HIT, BENCH_CHURN_MISS, BENCH_CHURN_HIT,
+        BENCH_CHURN_HIT, BENCH_CHURN_HIT, BENCH_CHURN_MISS,
+        BENCH_CHURN_HIT, BENCH_CHURN_ERASE, BENCH_CHURN_INSERT,
+        BENCH_CHURN_HIT, BENCH_CHURN_MISS, BENCH_CHURN_HIT,
+        BENCH_CHURN_ERASE, BENCH_CHURN_INSERT
+    };
+    const size_t live_count = bench_churn_live_count(data->count);
+    size_t operation_count;
+    size_t hit_index = 0;
+    size_t miss_index = 0;
+    size_t erase_index = 0;
+    size_t insert_index = 0;
+    size_t operation_index;
+
+    result->checksum = values->churn_checksum;
+    if (!bench_workload_operation_count(data->count, BENCH_CHURN,
+                                        &operation_count)) {
+        return;
+    }
+    for (operation_index = 0; operation_index < operation_count;
+         ++operation_index) {
+        const bench_churn_operation operation =
+            operations[operation_index % 20u];
+        size_t index;
+
+        if (operation == BENCH_CHURN_HIT) {
+            uint64_t value = 0;
+
+            index = hit_index++ % live_count;
+            if (bench_get_item(map, kind, data, index, false, &value) &&
+                value == values->original[index]) {
+                ++result->successful;
+                result->value_sum += value;
+            }
+        } else if (operation == BENCH_CHURN_MISS) {
+            uint64_t value = 0;
+
+            index = miss_index++ % data->count;
+            if (!bench_get_item(map, kind, data, index, true, &value))
+                ++result->successful;
+        } else if (operation == BENCH_CHURN_ERASE) {
+            index = erase_index++ % live_count;
+            if (bench_remove_item(map, kind, data, index)) {
+                ++result->successful;
+                result->checksum -=
+                    bench_checksum_add(0u, values->original[index]);
+            }
+        } else {
+            bool inserted = false;
+
+            index = insert_index++ % live_count;
+            if (bench_put_item(map, kind, data, index,
+                               values->original[index], &inserted) &&
+                inserted) {
+                ++result->successful;
+                ++result->inserted;
+                result->checksum = bench_checksum_add(
+                    result->checksum, values->original[index]);
+            }
+        }
+        ++result->seen;
+    }
 }
 
 static void bench_apply_workload(void *map, bench_key_kind kind,
@@ -406,6 +553,9 @@ static void bench_apply_workload(void *map, bench_key_kind kind,
         case BENCH_ITERATE:
             result->successful += (size_t)bench_adapter.iterate(
                 map, &result->checksum, &result->seen);
+            break;
+        case BENCH_CHURN:
+            bench_apply_churn(map, kind, data, values, result);
             break;
         case BENCH_WORKLOAD_COUNT:
             break;
@@ -479,6 +629,16 @@ static bool bench_operation_result_is_valid(
         case BENCH_ITERATE:
             return result->successful == 1u && result->seen == data->count &&
                    result->checksum == values->original_checksum;
+        case BENCH_CHURN: {
+            size_t operation_count;
+
+            return bench_workload_operation_count(data->count, workload,
+                                                  &operation_count) &&
+                   result->successful == operation_count &&
+                   result->inserted == (operation_count / 20u) * 3u &&
+                   result->seen == operation_count &&
+                   result->checksum == values->churn_checksum;
+        }
         case BENCH_WORKLOAD_COUNT:
             return false;
     }
@@ -502,11 +662,16 @@ static bool bench_prepare_map(void **map_out, bench_key_kind kind,
     if (map == NULL) return false;
     *map_out = map;
     if (check_wrong_kind && !bench_wrong_kind_is_safe(map, kind)) return false;
-    if (workload == BENCH_INSERT_RESERVED &&
+    if ((workload == BENCH_INSERT_RESERVED || workload == BENCH_CHURN) &&
         !bench_adapter.reserve(map, data->count)) {
         return false;
     }
-    return insert_workload || bench_populate(map, kind, data, values);
+    if (insert_workload) return true;
+    if (workload == BENCH_CHURN) {
+        return bench_populate_count(map, kind, data, values,
+                                    bench_churn_live_count(data->count));
+    }
+    return bench_populate(map, kind, data, values);
 }
 
 static bool bench_run_untimed_map(const bench_dataset *data,
@@ -535,8 +700,10 @@ static bool bench_run_untimed_map(const bench_dataset *data,
         failure = "operation result mismatch";
         goto cleanup;
     }
-    if (!bench_validate_contents(map, kind, data, values, final_empty,
-                                 final_updated)) {
+    if (workload == BENCH_CHURN
+            ? !bench_validate_churn_contents(map, kind, data, values)
+            : !bench_validate_contents(map, kind, data, values, final_empty,
+                                       final_updated)) {
         failure = "final map validation failed";
         goto cleanup;
     }
@@ -599,7 +766,12 @@ static bool bench_run_timed_batch(const bench_dataset *data,
         failure = "timed batch size overflow";
         goto cleanup;
     }
-    operations = data->count * map_count;
+    if (!bench_workload_operation_count(data->count, workload, &operations) ||
+        operations > SIZE_MAX / map_count) {
+        failure = "timed operation count overflow";
+        goto cleanup;
+    }
+    operations *= map_count;
     if (workload == BENCH_LOOKUP_HIT) {
         if (operations > SIZE_MAX / sizeof(*lookup_values)) {
             failure = "lookup value array size overflow";
@@ -659,8 +831,12 @@ static bool bench_run_timed_batch(const bench_dataset *data,
             failure == NULL) {
             failure = "timed operation result mismatch";
         }
-        if (!bench_validate_contents(maps[map_index], kind, data, values,
-                                     final_empty, final_updated) &&
+        if ((workload == BENCH_CHURN
+                 ? !bench_validate_churn_contents(maps[map_index], kind, data,
+                                                  values)
+                 : !bench_validate_contents(maps[map_index], kind, data,
+                                            values, final_empty,
+                                            final_updated)) &&
             failure == NULL) {
             failure = "timed map validation failed";
         }

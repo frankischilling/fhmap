@@ -11,6 +11,10 @@ fetch_test_dir=$(mktemp -d /tmp/fhmap-fetch-test.XXXXXX)
 stdout_file=$fetch_test_dir/stdout
 stderr_file=$fetch_test_dir/stderr
 names='cc verstable khashl khash mlib stc stb_ds uthash tidwall pottery'
+summarizer=$repo_root/bench/compare/summarize.awk
+comparison_runner=$repo_root/bench/compare/run-comparison.sh
+valid_bench_fixture=$repo_root/tests/fixtures/bench-valid.tsv
+failed_bench_fixture=$repo_root/tests/fixtures/bench-failed.tsv
 
 test "$(grep -c '^#define POTTERY_OPEN_HASH_MAP_ALLOC_MALLOC bench_malloc$' \
     bench/compare/adapters/pottery_adapter.c)" -eq 2
@@ -23,6 +27,16 @@ if grep '^#define POTTERY_OPEN_HASH_MAP_ALLOC_REALLOC' \
     printf 'Pottery adapter configured an incompatible realloc callback\n' >&2
     exit 1
 fi
+
+make_target_plan=$fetch_test_dir/make-target-plan
+make -B -n bench-compare-fetch bench-compare-build bench-compare-smoke \
+    bench-compare >"$make_target_plan"
+test "$(grep -c '^./bench/compare/fetch-competitors[.]sh --dest build/competitors$' \
+    "$make_target_plan")" -eq 1
+test "$(grep -c '^./tests/test_bench_compare[.]sh$' \
+    "$make_target_plan")" -eq 1
+test "$(grep -c '^./bench/compare/run-comparison[.]sh$' \
+    "$make_target_plan")" -eq 1
 test "$(grep -c '^#define POTTERY_OPEN_HASH_MAP_KEY_HASH pottery_u64_hash$' \
     bench/compare/adapters/pottery_adapter.c)" -eq 1
 if grep 'pottery_knuth_hash_u64' bench/compare/adapters/pottery_adapter.c \
@@ -199,6 +213,77 @@ expect_command_failure()
     fi
     test -s "$stderr_file"
 }
+
+summary_file=$fetch_test_dir/summary
+awk -f "$summarizer" "$valid_bench_fixture" >"$summary_file"
+test "$(grep -c '^rank' "$summary_file")" -eq 176
+test "$(grep -c '^geomean' "$summary_file")" -eq 11
+awk -F '\t' '
+    $1 == "rank" && $2 == 32 && $3 == "u64" &&
+        $4 == "insert_reserved" && $5 == "fhmap" &&
+        $6 == "1.000" && $7 == "1.500" { fhmap_tie++ }
+    $1 == "rank" && $2 == 32 && $3 == "u64" &&
+        $4 == "insert_reserved" && $5 == "cc" &&
+        $6 == "1.000" && $7 == "1.500" { cc_tie++ }
+    $1 == "rank" && $2 == 32 && $3 == "u64" &&
+        $4 == "insert_reserved" && $5 == "verstable" &&
+        $6 == "2.000" && $7 == "3.000" { verstable_rank++ }
+    $1 == "geomean" && $2 == "fhmap" && $3 == "1000.000000" {
+        fhmap_mean++
+    }
+    $1 == "geomean" && $2 == "cc" && $3 == "1000.000000" { cc_mean++ }
+    $1 == "geomean" && $2 == "pottery" && $3 == "100.000000" {
+        pottery_mean++
+    }
+    END {
+        if (fhmap_tie != 1 || cc_tie != 1 || verstable_rank != 1 ||
+            fhmap_mean != 1 || cc_mean != 1 || pottery_mean != 1) exit 1
+    }
+' "$summary_file"
+
+large_count_fixture=$fetch_test_dir/large-count.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" }
+    { $5 = "18446744073709551615"; print }
+' "$valid_bench_fixture" >"$large_count_fixture"
+awk -f "$summarizer" "$large_count_fixture" >"$summary_file"
+test "$(awk -F '\t' '$1 == "rank" && $2 == "18446744073709551615" {
+        count++
+    } END { print count + 0 }' "$summary_file")" -eq 176
+
+expect_summary_failure()
+{
+    expect_command_failure awk -f "$summarizer" "$1"
+}
+
+expect_summary_failure "$failed_bench_fixture"
+
+missing_adapter=$fetch_test_dir/missing-adapter.tsv
+awk -F '\t' '$2 != "pottery"' "$valid_bench_fixture" >"$missing_adapter"
+expect_summary_failure "$missing_adapter"
+
+missing_scenario=$fetch_test_dir/missing-scenario.tsv
+awk -F '\t' 'NR != 1' "$valid_bench_fixture" >"$missing_scenario"
+expect_summary_failure "$missing_scenario"
+
+duplicate_scenario=$fetch_test_dir/duplicate-scenario.tsv
+cp "$valid_bench_fixture" "$duplicate_scenario"
+sed -n '1p' "$valid_bench_fixture" >>"$duplicate_scenario"
+expect_summary_failure "$duplicate_scenario"
+
+na_primary=$fetch_test_dir/na-primary.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" } NR == 1 { $7 = "N/A" } { print }' \
+    "$valid_bench_fixture" >"$na_primary"
+expect_summary_failure "$na_primary"
+
+failed_primary=$fetch_test_dir/failed-primary.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" } NR == 1 { $9 = "failed" } { print }' \
+    "$valid_bench_fixture" >"$failed_primary"
+expect_summary_failure "$failed_primary"
+
+unexpected_metadata=$fetch_test_dir/unexpected-metadata.tsv
+cp "$valid_bench_fixture" "$unexpected_metadata"
+printf 'meta\tunexpected\tvalue\n' >>"$unexpected_metadata"
+expect_summary_failure "$unexpected_metadata"
 
 offline_dir=$fetch_test_dir/offline
 mkdir "$offline_dir" "$offline_dir/bin" "$offline_dir/cwd"
@@ -599,17 +684,17 @@ active_fetcher=$fixture_fetcher
 output=$($binary --smoke --count 32 --samples 3)
 rows=$(printf '%s\n' "$output" |
     awk -F '\t' '$1 == "result" { count++ } END { print count + 0 }')
-test "$rows" -eq 14
+test "$rows" -eq 16
 
 printf '%s\n' "$output" | awk -F '\t' '
     BEGIN {
-        split("insert_reserved insert_growing update lookup_hit lookup_miss erase iterate", workloads, " ")
+        split("insert_reserved insert_growing update lookup_hit lookup_miss erase iterate churn", workloads, " ")
     }
     {
         if (NF != 15 || $1 != "result" || $2 != "fhmap") exit 1
         if ($3 != "u64" && $3 != "cstr") exit 1
         known = 0
-        for (i = 1; i <= 7; ++i) {
+        for (i = 1; i <= 8; ++i) {
             if ($4 == workloads[i]) known = 1
         }
         if (!known || $5 != "32" || $6 != "3") exit 1
@@ -623,10 +708,10 @@ printf '%s\n' "$output" | awk -F '\t' '
         seen[$3 SUBSEP $4]++
     }
     END {
-        if (NR != 14) exit 1
+        if (NR != 16) exit 1
         for (kind = 1; kind <= 2; ++kind) {
             key_kind = kind == 1 ? "u64" : "cstr"
-            for (i = 1; i <= 7; ++i) {
+            for (i = 1; i <= 8; ++i) {
                 if (seen[key_kind SUBSEP workloads[i]] != 1) exit 1
             }
         }
@@ -636,10 +721,10 @@ printf '%s\n' "$output" | awk -F '\t' '
 seed_zero_output=$($binary --seed 0 --count 32 --samples 3)
 seed_zero_rows=$(printf '%s\n' "$seed_zero_output" |
     awk -F '\t' '$1 == "result" { count++ } END { print count + 0 }')
-test "$seed_zero_rows" -eq 14
+test "$seed_zero_rows" -eq 16
 printf '%s\n' "$seed_zero_output" | awk -F '\t' '
     BEGIN {
-        split("insert_reserved insert_growing update lookup_hit lookup_miss erase iterate", workloads, " ")
+        split("insert_reserved insert_growing update lookup_hit lookup_miss erase iterate churn", workloads, " ")
     }
     {
         if (NF != 15 || $1 != "result" || $2 != "fhmap") exit 1
@@ -653,17 +738,17 @@ printf '%s\n' "$seed_zero_output" | awk -F '\t' '
             if ($i !~ /^[0-9]+$/) exit 1
         }
         known = 0
-        for (i = 1; i <= 7; ++i) {
+        for (i = 1; i <= 8; ++i) {
             if ($4 == workloads[i]) known = 1
         }
         if (!known) exit 1
         seen[$3 SUBSEP $4]++
     }
     END {
-        if (NR != 14) exit 1
+        if (NR != 16) exit 1
         for (kind = 1; kind <= 2; ++kind) {
             key_kind = kind == 1 ? "u64" : "cstr"
-            for (i = 1; i <= 7; ++i) {
+            for (i = 1; i <= 8; ++i) {
                 if (seen[key_kind SUBSEP workloads[i]] != 1) exit 1
             }
         }
@@ -673,10 +758,10 @@ printf '%s\n' "$seed_zero_output" | awk -F '\t' '
 tiny_output=$($binary --smoke --count 1 --samples 1)
 tiny_rows=$(printf '%s\n' "$tiny_output" |
     awk -F '\t' '$1 == "result" { count++ } END { print count + 0 }')
-test "$tiny_rows" -eq 14
+test "$tiny_rows" -eq 16
 printf '%s\n' "$tiny_output" | awk -F '\t' '
     BEGIN {
-        split("insert_reserved insert_growing update lookup_hit lookup_miss erase iterate", workloads, " ")
+        split("insert_reserved insert_growing update lookup_hit lookup_miss erase iterate churn", workloads, " ")
     }
     {
         if (NF != 15 || $1 != "result" || $2 != "fhmap") exit 1
@@ -690,17 +775,17 @@ printf '%s\n' "$tiny_output" | awk -F '\t' '
             if ($i !~ /^[0-9]+$/) exit 1
         }
         known = 0
-        for (i = 1; i <= 7; ++i) {
+        for (i = 1; i <= 8; ++i) {
             if ($4 == workloads[i]) known = 1
         }
         if (!known) exit 1
         seen[$3 SUBSEP $4]++
     }
     END {
-        if (NR != 14) exit 1
+        if (NR != 16) exit 1
         for (kind = 1; kind <= 2; ++kind) {
             key_kind = kind == 1 ? "u64" : "cstr"
-            for (i = 1; i <= 7; ++i) {
+            for (i = 1; i <= 8; ++i) {
                 if (seen[key_kind SUBSEP workloads[i]] != 1) exit 1
             }
         }
@@ -715,7 +800,7 @@ check_adapter_output()
     awk -F '\t' -v map="$checked_map" -v count="$checked_count" \
         -v samples="$checked_samples" '
         BEGIN {
-            split("insert_reserved insert_growing update lookup_hit lookup_miss erase iterate", workloads, " ")
+            split("insert_reserved insert_growing update lookup_hit lookup_miss erase iterate churn", workloads, " ")
         }
         {
             if (NF != 15 || $1 != "result" || $2 != map) exit 1
@@ -728,18 +813,23 @@ check_adapter_output()
             for (i = 11; i <= 15; ++i) {
                 if ($i !~ /^[0-9]+$/) exit 1
             }
+            if ($4 == "churn") {
+                expected_size = int(count * 7 / 10)
+                if (expected_size < 1) expected_size = 1
+                if ($10 == 0 || $11 != expected_size) exit 1
+            }
             known = 0
-            for (i = 1; i <= 7; ++i) {
+            for (i = 1; i <= 8; ++i) {
                 if ($4 == workloads[i]) known = 1
             }
             if (!known) exit 1
             seen[$3 SUBSEP $4]++
         }
         END {
-            if (NR != 14) exit 1
+            if (NR != 16) exit 1
             for (kind = 1; kind <= 2; ++kind) {
                 key_kind = kind == 1 ? "u64" : "cstr"
-                for (i = 1; i <= 7; ++i) {
+                for (i = 1; i <= 8; ++i) {
                     if (seen[key_kind SUBSEP workloads[i]] != 1) exit 1
                 }
             }
@@ -789,13 +879,102 @@ do
         check_adapter_output "$adapter_name" 32 1
 done
 
+comparison_report=$fetch_test_dir/comparison-report.tsv
+comparison_cwd=$fetch_test_dir/comparison-cwd
+mkdir "$comparison_cwd"
+(
+    cd "$comparison_cwd"
+    FHMAP_BENCH_COUNTS=1 FHMAP_BENCH_SAMPLES=1 \
+        "$comparison_runner" >"$comparison_report"
+)
+for metadata_name in uname cpu_model compiler compiler_flags branch commit \
+    counts samples seed cpu_pin
+do
+    test "$(awk -F '\t' -v name="$metadata_name" \
+        '$1 == "meta" && $2 == name { count++ } END { print count + 0 }' \
+        "$comparison_report")" -eq 1
+done
+test "$(awk -F '\t' '$1 == "meta" && $2 ~ /^lock_/ { count++ } \
+    END { print count + 0 }' "$comparison_report")" -eq 10
+test "$(grep -c '^result' "$comparison_report")" -eq 176
+test "$(grep -c '^rank' "$comparison_report")" -eq 176
+test "$(grep -c '^geomean' "$comparison_report")" -eq 11
+test "$(awk -F '\t' '$1 == "result" && $5 == 1 && $6 == 1 { count++ } \
+    END { print count + 0 }' "$comparison_report")" -eq 176
+awk -f "$summarizer" "$comparison_report" >"$summary_file"
+test "$(grep -c '^rank' "$summary_file")" -eq 176
+test "$(grep -c '^geomean' "$summary_file")" -eq 11
+
+duplicate_rank=$fetch_test_dir/duplicate-rank.tsv
+cp "$comparison_report" "$duplicate_rank"
+awk -F '\t' '$1 == "rank" { print; exit }' "$comparison_report" \
+    >>"$duplicate_rank"
+expect_summary_failure "$duplicate_rank"
+
+malformed_rank=$fetch_test_dir/malformed-rank.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" }
+    $1 == "rank" && !changed { $7 = "bad"; changed = 1 }
+    { print }
+' "$comparison_report" >"$malformed_rank"
+expect_summary_failure "$malformed_rank"
+
+duplicate_geomean=$fetch_test_dir/duplicate-geomean.tsv
+cp "$comparison_report" "$duplicate_geomean"
+awk -F '\t' '$1 == "geomean" { print; exit }' "$comparison_report" \
+    >>"$duplicate_geomean"
+expect_summary_failure "$duplicate_geomean"
+
+mismatched_rank=$fetch_test_dir/mismatched-rank.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" }
+    $1 == "rank" && !changed { $2 = 999; changed = 1 }
+    { print }
+' "$comparison_report" >"$mismatched_rank"
+expect_summary_failure "$mismatched_rank"
+
+mismatched_geomean=$fetch_test_dir/mismatched-geomean.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" }
+    $1 == "geomean" && !changed { $3 = "999.000000"; changed = 1 }
+    { print }
+' "$comparison_report" >"$mismatched_geomean"
+expect_summary_failure "$mismatched_geomean"
+
+invalid_format=$fetch_test_dir/invalid-format.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" }
+    $1 == "meta" && $2 == "format" { $3 = "wrong-format" }
+    { print }
+' "$comparison_report" >"$invalid_format"
+expect_summary_failure "$invalid_format"
+
+duplicate_metadata=$fetch_test_dir/duplicate-metadata.tsv
+cp "$comparison_report" "$duplicate_metadata"
+awk -F '\t' '$1 == "meta" && $2 == "uname" { print; exit }' \
+    "$comparison_report" >>"$duplicate_metadata"
+expect_summary_failure "$duplicate_metadata"
+
+if command -v taskset >/dev/null 2>&1 && taskset -c 0 true >/dev/null 2>&1; then
+    awk -F '\t' '$1 == "meta" && $2 == "cpu_pin" && $3 == 0 { found++ }
+        END { if (found != 1) exit 1 }' "$comparison_report"
+else
+    awk -F '\t' '$1 == "meta" && $2 == "cpu_pin" && $3 == "none" {
+            found++
+        } END { if (found != 1) exit 1 }' "$comparison_report"
+fi
+
+if FHMAP_BENCH_COUNTS='1,bad' "$comparison_runner" \
+        >"$stdout_file" 2>"$stderr_file"; then
+    printf 'comparison runner accepted an invalid count list\n' >&2
+    exit 1
+fi
+test ! -s "$stdout_file"
+test -s "$stderr_file"
+
 test -n "$pottery_boundary_output"
 printf '%s\n' "$pottery_boundary_output" | awk -F '\t' '
     {
         expected_capacity = $4 == "update" ? 32 : 16
         if ($11 > $15 || $15 != expected_capacity) exit 1
     }
-    END { if (NR != 14) exit 1 }
+    END { if (NR != 16) exit 1 }
 '
 pottery_boundary_samples=$(
     ./build/bench-compare/pottery --smoke --count 11 --samples 3
