@@ -456,6 +456,7 @@ $(BENCH_COMPARE_TIDWALL_TEST): tests/test_tidwall_adapter.c \
 		$(BENCH_COMPARE_TIDWALL_OBJ) | \
 		$(BENCH_COMPARE_BUILD)
 	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror \
+		-DFHMAP_BENCH_ADAPTER_TESTING \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
 		tests/test_tidwall_adapter.c $(BENCH_ALLOC_SRC) \
 		bench/compare/adapters/tidwall_adapter.c \
@@ -631,6 +632,7 @@ $(BENCH_COMPARE_TIDWALL_TEST_CLANG): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
 		$(BENCH_COMPARE_TIDWALL_SOURCES) \
 		$(BENCH_COMPARE_TIDWALL_OBJ_CLANG) | $(BENCH_COMPARE_BUILD)
 	clang $(CFLAGS_COMMON) -O1 -g -Werror \
+		-DFHMAP_BENCH_ADAPTER_TESTING \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
 		tests/test_tidwall_adapter.c $(BENCH_ALLOC_SRC) \
 		bench/compare/adapters/tidwall_adapter.c \
@@ -766,6 +768,7 @@ $(BENCH_COMPARE_TIDWALL_TEST_SANITIZE): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
 		$(BENCH_COMPARE_TIDWALL_OBJ_SANITIZE) | $(BENCH_COMPARE_BUILD)
 	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror -fno-omit-frame-pointer \
 		-fsanitize=address,undefined \
+		-DFHMAP_BENCH_ADAPTER_TESTING \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
 		tests/test_tidwall_adapter.c $(BENCH_ALLOC_SRC) \
 		bench/compare/adapters/tidwall_adapter.c \

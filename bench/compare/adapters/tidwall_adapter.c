@@ -74,16 +74,33 @@ static int tidwall_cstr_compare(const void *left, const void *right,
     return strcmp(a->key, b->key);
 }
 
-static size_t tidwall_entry_threshold(size_t buckets)
+static bool tidwall_entry_threshold(size_t buckets, size_t *threshold)
 {
-    return (buckets / 5u) * 3u + ((buckets % 5u) * 3u) / 5u;
+    double scaled;
+
+    if (threshold == NULL || buckets == 0u ||
+        (buckets & (buckets - 1u)) != 0u) {
+        return false;
+    }
+    scaled = (double)buckets * (60u / 100.0);
+    if (!(scaled >= 0.0) || !(scaled < (double)buckets)) return false;
+    *threshold = (size_t)scaled;
+    return true;
 }
+
+#ifdef FHMAP_BENCH_ADAPTER_TESTING
+bool tidwall_bench_test_entry_threshold(size_t buckets, size_t *threshold)
+{
+    return tidwall_entry_threshold(buckets, threshold);
+}
+#endif
 
 static bool tidwall_raw_bucket_request(size_t expected, size_t element_size,
                                        size_t *request)
 {
     size_t bucket_size;
     size_t buckets = 16u;
+    size_t threshold;
     const size_t alignment = sizeof(uintptr_t);
 
     if (request == NULL) return false;
@@ -91,7 +108,9 @@ static bool tidwall_raw_bucket_request(size_t expected, size_t element_size,
     bucket_size = sizeof(uint64_t) + element_size;
     if (bucket_size > SIZE_MAX - (alignment - 1u)) return false;
     bucket_size = (bucket_size + alignment - 1u) & ~(alignment - 1u);
-    while (tidwall_entry_threshold(buckets) < expected) {
+    for (;;) {
+        if (!tidwall_entry_threshold(buckets, &threshold)) return false;
+        if (threshold >= expected) break;
         if (buckets > SIZE_MAX / 2u) return false;
         buckets *= 2u;
     }
@@ -139,12 +158,14 @@ static bool tidwall_bench_reserve(void *raw_map, size_t expected)
 {
     tidwall_bench_map *map = tidwall_bench_cast(raw_map);
     size_t buckets;
+    size_t threshold;
 
     if (map == NULL) return false;
     if (map->kind != BENCH_KEYS_U64 && map->kind != BENCH_KEYS_CSTR)
         return false;
     buckets = hashmap_nbuckets(map->map);
-    return expected <= tidwall_entry_threshold(buckets);
+    return tidwall_entry_threshold(buckets, &threshold) &&
+           expected <= threshold;
 }
 
 static bool tidwall_bench_put_u64(void *raw_map, uint64_t key,

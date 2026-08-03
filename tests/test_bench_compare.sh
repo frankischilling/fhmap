@@ -83,16 +83,22 @@ grep -E '^cc .* -march=native.*[[:space:]]-c[[:space:]].*tidwall/hashmap[.]c -o 
 grep -E '^clang .* -march=native.*[[:space:]]-c[[:space:]].*tidwall/hashmap[.]c -o .*tidwall_hashmap_clang[.]o$' \
     "$tidwall_native_joined" >/dev/null
 
-pottery_hook_plan=$fetch_test_dir/pottery-hook-plan
-pottery_hook_joined=$fetch_test_dir/pottery-hook-joined
+adapter_hook_plan=$fetch_test_dir/adapter-hook-plan
+adapter_hook_joined=$fetch_test_dir/adapter-hook-joined
 make -B -n \
+    build/bench-compare/tidwall \
+    build/bench-compare/test_tidwall_adapter \
+    build/bench-compare/tidwall_clang \
+    build/bench-compare/test_tidwall_adapter_clang \
+    build/bench-compare/tidwall_sanitize \
+    build/bench-compare/test_tidwall_adapter_sanitize \
     build/bench-compare/pottery \
     build/bench-compare/test_pottery_adapter \
     build/bench-compare/pottery_clang \
     build/bench-compare/test_pottery_adapter_clang \
     build/bench-compare/pottery_sanitize \
     build/bench-compare/test_pottery_adapter_sanitize \
-    >"$pottery_hook_plan"
+    >"$adapter_hook_plan"
 awk '
     {
         command = command $0
@@ -104,19 +110,19 @@ awk '
         command = ""
     }
     END { if (command != "") print command }
-' "$pottery_hook_plan" >"$pottery_hook_joined"
+' "$adapter_hook_plan" >"$adapter_hook_joined"
 awk '
-    / -o .*\/test_pottery_adapter(_clang|_sanitize)?$/ {
+    / -o .*\/test_(tidwall|pottery)_adapter(_clang|_sanitize)?$/ {
         tests++
         if (index($0, "-DFHMAP_BENCH_ADAPTER_TESTING") == 0) exit 1
         next
     }
-    / -o .*\/pottery(_clang|_sanitize)?$/ {
+    / -o .*\/(tidwall|pottery)(_clang|_sanitize)?$/ {
         production++
         if (index($0, "-DFHMAP_BENCH_ADAPTER_TESTING") != 0) exit 1
     }
-    END { if (tests != 3 || production != 3) exit 1 }
-' "$pottery_hook_joined"
+    END { if (tests != 6 || production != 6) exit 1 }
+' "$adapter_hook_joined"
 
 missing_matrix_plan=$fetch_test_dir/missing-typed-matrix-plan
 make -B -n \

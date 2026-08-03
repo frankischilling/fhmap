@@ -9,6 +9,7 @@
 static size_t malloc_calls_until_failure;
 
 void *__real_bench_malloc(size_t size);
+bool tidwall_bench_test_entry_threshold(size_t buckets, size_t *threshold);
 
 void *__wrap_bench_malloc(size_t size)
 {
@@ -26,6 +27,59 @@ static void assert_stats_equal(bench_alloc_stats actual,
     assert(actual.peak_bytes == expected.peak_bytes);
     assert(actual.allocations == expected.allocations);
     assert(actual.frees == expected.frees);
+}
+
+static size_t pinned_threshold_reference(size_t buckets)
+{
+    const double scaled = (double)buckets * (60u / 100.0);
+
+    assert(scaled >= 0.0);
+    assert(scaled < (double)buckets);
+    return (size_t)scaled;
+}
+
+static void test_threshold_matches_pinned_expression(void)
+{
+    static const struct threshold_vector {
+        uint64_t buckets;
+        uint64_t threshold;
+    } vectors[] = {
+        {UINT64_C(9007199254740992), UINT64_C(5404319552844595)},
+        {UINT64_C(18014398509481984), UINT64_C(10808639105689190)},
+        {UINT64_C(36028797018963968), UINT64_C(21617278211378380)},
+        {UINT64_C(72057594037927936), UINT64_C(43234556422756760)},
+        {UINT64_C(144115188075855872), UINT64_C(86469112845513520)},
+        {UINT64_C(288230376151711744), UINT64_C(172938225691027040)},
+        {UINT64_C(576460752303423488), UINT64_C(345876451382054080)},
+        {UINT64_C(1152921504606846976), UINT64_C(691752902764108160)}
+    };
+    bench_alloc_stats before;
+    bench_alloc_stats ended;
+    size_t actual;
+    size_t buckets;
+    size_t index;
+
+    bench_alloc_reset();
+    bench_alloc_begin();
+    before = bench_alloc_snapshot();
+    buckets = 16u;
+    for (;;) {
+        assert(tidwall_bench_test_entry_threshold(buckets, &actual));
+        assert(actual == pinned_threshold_reference(buckets));
+        if (buckets > SIZE_MAX / 2u) break;
+        buckets *= 2u;
+    }
+    if (sizeof(size_t) >= sizeof(uint64_t)) {
+        for (index = 0u; index < sizeof(vectors) / sizeof(vectors[0]);
+             ++index) {
+            assert(tidwall_bench_test_entry_threshold(
+                (size_t)vectors[index].buckets, &actual));
+            assert(actual == (size_t)vectors[index].threshold);
+        }
+    }
+    assert_stats_equal(bench_alloc_snapshot(), before);
+    ended = bench_alloc_end();
+    assert(ended.current_bytes == 0u);
 }
 
 static void test_empty_map(bench_key_kind kind)
@@ -301,6 +355,7 @@ static void test_wrong_kind_and_invalid_create(void)
 int main(void)
 {
     assert(strcmp(bench_adapter.name, "tidwall") == 0);
+    test_threshold_matches_pinned_expression();
     test_empty_map(BENCH_KEYS_U64);
     test_empty_map(BENCH_KEYS_CSTR);
     test_string_contract();
