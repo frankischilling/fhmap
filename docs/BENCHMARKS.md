@@ -3,7 +3,8 @@
 The comparison suite runs `fhmap` and ten pinned C hash map implementations
 through the same driver. It covers `uint64_t` keys and borrowed C string keys.
 Treat its output as a measurement of one build and host, not as a general
-ordering of the libraries.
+ordering of the libraries. The suite does not cover every implementation or
+workload in the catalog supplied for this work.
 
 ## Requirements
 
@@ -335,3 +336,96 @@ This is the untouched pre-optimization baseline captured before the combined
 insertion-probe and hot API inlining experiments. It does not show that one map
 is fastest for every workload. The per-scenario rows are the relevant
 comparison when an application's key type, size, and operation mix are known.
+
+The baseline file has 21 metadata rows, 704 result rows, 704 rank rows, and 11
+geomean rows. Its SHA-256 digest is
+`f7cadd758baf2acbb2916bdc14e93a8da6843b794922fc522b6edcde0e89a551`.
+
+## Final accepted-code report
+
+The final report is
+[`bench/results/2026-08-02-final.tsv`](../bench/results/2026-08-02-final.tsv).
+It records commit `3b26e77dbf39cf0ea71866b0367a27dbdf74ca05` on
+`perf/issue-1-benchmark-suite`. Its CPU, kernel, compiler, compiler flags,
+counts, sample count, seed, CPU pin, and ten competitor lock revisions match
+the baseline metadata above. The file has 21 metadata rows, 704 result rows,
+704 rank rows, and 11 geomean rows, with all 704 results marked `ok`. Its
+SHA-256 digest is
+`707b62a62736a9022221814c2eab6f0877d69349293f645710074c09161ceebc`.
+
+The table compares the two saved geomeans. Ranks are calculated separately for
+each report.
+
+| Adapter | Baseline rank | Baseline Mops/s | Final rank | Final Mops/s | Observed change |
+|---|---:|---:|---:|---:|---:|
+| M*LIB | 1 | 40.441930 | 1 | 55.131920 | +36.324% |
+| Verstable | 4 | 38.130426 | 2 | 50.546701 | +32.563% |
+| STC | 3 | 39.287157 | 3 | 50.487647 | +28.509% |
+| khash | 5 | 37.000197 | 4 | 49.999000 | +35.132% |
+| CC | 2 | 39.491569 | 5 | 48.698045 | +23.313% |
+| khashl | 7 | 27.112437 | 6 | 34.995061 | +29.074% |
+| Pottery | 6 | 27.996975 | 7 | 33.574391 | +19.921% |
+| fhmap | 8 | 26.108846 | 8 | 32.832863 | +25.754% |
+| stb_ds | 9 | 24.230024 | 9 | 31.286507 | +29.123% |
+| tidwall | 10 | 17.025416 | 10 | 20.279344 | +19.112% |
+| uthash | 11 | 12.893230 | 11 | 17.291412 | +34.112% |
+
+The final run reported a higher fhmap geomean, but it did not run optimized
+fhmap code. `fhmap.h` is byte-for-byte identical to the file at the baseline
+commit. Every unchanged competitor also reported a higher geomean, ranging
+from 19.112% to 36.324%. These are separate long runs, so their differences do
+not isolate a code effect.
+
+fhmap's average per-scenario rank changed from 6.469 to 6.813. Compared with
+the baseline, 15 of its 64 final medians were more than 5% slower, 46 were more
+than 5% faster, and 3 stayed within 5%. The largest slowdown was u64 reserved
+insertion at 1,048,576 entries, where median +/- MAD changed from
+`63.881 +/- 3.749` to `105.720 +/- 13.090` ns. The largest decrease was u64
+update at 262,144 entries, from `116.124 +/- 35.780` to
+`37.471 +/- 3.618` ns. Since the implementation did not change, neither result
+is evidence of an optimization or regression in the source.
+
+The baseline and final reports match in all 704 checksums, final sizes, current
+bytes, peak bytes, allocation counts, and capacities. fhmap's 64 current and
+peak byte results are unchanged. Current requested bytes range from `1,287` at
+32 entries to `35,651,783` at 1,048,576 entries. The largest peak is
+`53,477,606` bytes during growing insertion at 1,048,576 entries. These values
+cover the table-owned allocation scope described above, not total process
+memory.
+
+## Optimization experiments
+
+Neither measured experiment passed its acceptance gates, so no core
+optimization was retained.
+
+The combined insertion probe passed the GCC, Clang, sanitizer, SSE2, scalar,
+collision, tombstone, growth, and differential checks. Its separate candidate
+run had 11 of 64 fhmap medians more than 5% above the baseline. C string
+reserved insertion at 1,048,576 entries was the worst observed case at
+`120.946 +/- 12.322` ns, 48.178% above the baseline. Current bytes, peak bytes,
+allocation counts, and capacities did not change. Because all ten unchanged
+competitors moved by +20.915% to +42.115% in that run, its aggregate throughput
+could not be attributed to the probe change. The candidate was removed.
+
+The hot API inlining experiment applied forced inlining to seven public
+operations. Under GCC and Clang, the optimized benchmark had no direct calls to
+`fhmap_put`, `fhmap_get_const`, or `fhmap_remove`, and its functional checks
+passed. It failed the portability gate. GCC produced array-bounds diagnostics
+when compiled with `-Werror -O3`, while Clang produced
+`-Wstatic-in-inline` diagnostics. Against an adjacent same-session control,
+the candidate fhmap geomean was `37.426758` Mops/s versus `40.269948` Mops/s,
+a 7.060% decrease. Twenty-five of 64 medians were more than 5% higher, and C
+string reserved insertion at 32 entries rose 74.789%. The comparison executable
+grew from 48,680 to 56,872 bytes, and its text size grew from 33,878 to 44,250
+bytes. The candidate was removed.
+
+The original insertion path and out-of-line raw API boundary remain in
+`fhmap.h`. A generated typed fast path could be evaluated under a separate
+issue, with its own portability, code-size, correctness, memory, and
+same-session performance checks. The results here do not predict whether that
+approach would pass.
+
+The original performance target was not met. This work added a reproducible
+representative suite and measured two hypotheses, but it did not make fhmap
+faster or establish that it beats the untested maps and workloads outside the
+suite.

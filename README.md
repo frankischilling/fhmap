@@ -1,12 +1,12 @@
 # fhmap
 
-`fhmap.h` is a fast, compact, single-header hash map for C11 on Linux. It
+`fhmap.h` is a compact, single-header hash map for C11 on Linux. It
 stores fixed-size keys and values inline, performs no allocation per entry, and
 uses a SwissTable-style control-byte array so most failed lookups never touch
 key or value storage.
 
 The library is intended for systems code, games, compilers, caches, and tools
-that need a simple C map without a dependency tree. It is engineered for high
+that need a simple C map without a dependency tree. It is designed for high
 throughput and predictable memory use; benchmark it with your own key types and
 workload before making absolute performance claims.
 
@@ -192,8 +192,21 @@ The benchmark prints insert, successful lookup, failed lookup, iteration, and
 erase throughput plus table allocation size. CPU, compiler, flags, key
 distribution, and load factor can change results substantially.
 
+## Measured comparison
+
+On the reference Intel i9-10900F host, fhmap ranked eighth of eleven in both
+saved full comparisons. Its equal-weight geomean was `26.108846` Mops/s in the
+[baseline](bench/results/2026-08-02-i9-10900f-gcc13-baseline.tsv) and
+`32.832863` Mops/s in the
+[final run](bench/results/2026-08-02-final.tsv). The core source is identical
+in those reports, and every unchanged competitor also recorded higher
+throughput in the final run. The difference is run-to-run movement, not a
+retained optimization. Both core experiments missed their acceptance gates, so
+this work kept the original implementation.
+
 See the [benchmark comparison guide](docs/BENCHMARKS.md) for the pinned
-competitors, workload definitions, report format, and reference baseline.
+competitors, workload definitions, report format, memory results, rejected
+experiments, and measurement limits.
 
 ## Configuration
 
