@@ -1,0 +1,10 @@
+cc	https://github.com/JacksonAllan/CC.git	2d62942eb2369b5387e0c4f2aa06f052004d16e0	LICENSE	cc.h
+verstable	https://github.com/JacksonAllan/Verstable.git	dd83033fb72736a1d2332e43b84b7794b5d19635	LICENSE	verstable.h
+khashl	https://github.com/attractivechaos/khashl.git	9e86261a66015c56c596ef31beee66d96dec5920	khashl.h	khashl.h
+khash	https://github.com/attractivechaos/klib.git	97a0fcb790b43b9e5da8994f4671021fec036f19	LICENSE.txt	khash.h
+mlib	https://github.com/P-p-H-d/mlib.git	4acdfe4c12040150e2e531517a005a1aace6b794	LICENSE	m-core.h,m-dict.h
+stc	https://github.com/stclib/STC.git	7c65ea473240270fcb8c0a287b04257b58902125	LICENSE	include/stc
+stb_ds	https://github.com/nothings/stb.git	2c980bb59875b0d32144a71867fbdebb2f77cd20	LICENSE	stb_ds.h
+uthash	https://github.com/troydhanson/uthash.git	a49bed0b4abb7dff16c73906dcdc8a9718d582d2	LICENSE	src/uthash.h
+tidwall	https://github.com/tidwall/hashmap.c.git	3735986914fc1c4e6a9123b406d0970666aa4aec	LICENSE	hashmap.h,hashmap.c
+pottery	https://github.com/ludocode/pottery.git	741bf5fa1ef348c43a86e79322545dc7d6320007	LICENSE	include/pottery

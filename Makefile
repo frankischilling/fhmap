@@ -13,9 +13,13 @@ BENCH_COMPARE_SRC := $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
 BENCH_COMPARE_BUILD := $(BUILD)/bench-compare
 BENCH_COMPARE_FHMAP := $(BENCH_COMPARE_BUILD)/fhmap
 BENCH_COMPARE_PERMUTED := $(BENCH_COMPARE_BUILD)/fhmap_permuted_hits
+BENCH_COMPARE_FETCHER := bench/compare/fetch-competitors.sh
+BENCH_COMPARE_LOCK := bench/compare/competitors.lock
+BENCH_COMPARE_COMPETITORS := $(BUILD)/competitors
 BENCH_SRC := bench/bench_fhmap.c
 
-.PHONY: all test clang-test sanitize bench bench-compare-smoke clean
+.PHONY: all test clang-test sanitize bench bench-compare-lock \
+	bench-compare-fetch bench-compare-smoke clean
 
 all: test
 
@@ -38,7 +42,7 @@ $(BUILD)/test_bench_alloc: $(BENCH_ALLOC_TEST_SRC) $(BENCH_ALLOC_SRC) \
 	$(CC) $(CFLAGS_COMMON) -O2 -g $(BENCH_ALLOC_TEST_SRC) \
 		$(BENCH_ALLOC_SRC) -o $@
 
-test: $(BUILD)/test_fhmap $(BUILD)/test_bench_common \
+test: bench-compare-lock $(BUILD)/test_fhmap $(BUILD)/test_bench_common \
 		$(BUILD)/test_bench_alloc
 	./$(BUILD)/test_fhmap
 	./$(BUILD)/test_bench_common
@@ -91,7 +95,14 @@ $(BENCH_COMPARE_PERMUTED): $(BENCH_COMPARE_SRC) \
 		-DFHMAP_BENCH_TEST_PERMUTE_LOOKUP_HITS \
 		$(BENCH_COMPARE_SRC) -o $@
 
-bench-compare-smoke: $(BENCH_COMPARE_FHMAP) $(BENCH_COMPARE_PERMUTED)
+bench-compare-lock: $(BENCH_COMPARE_FETCHER) $(BENCH_COMPARE_LOCK)
+	sh $(BENCH_COMPARE_FETCHER) --check-lock
+
+bench-compare-fetch: bench-compare-lock | $(BUILD)
+	sh $(BENCH_COMPARE_FETCHER) --dest $(BENCH_COMPARE_COMPETITORS)
+
+bench-compare-smoke: bench-compare-lock $(BENCH_COMPARE_FHMAP) \
+		$(BENCH_COMPARE_PERMUTED)
 	sh tests/test_bench_compare.sh
 
 $(BUILD)/bench_fhmap: $(BENCH_SRC) fhmap.h | $(BUILD)

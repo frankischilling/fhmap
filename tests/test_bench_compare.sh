@@ -2,11 +2,101 @@
 
 set -eu
 
+repo_root=$(pwd -P)
+fetcher=$repo_root/bench/compare/fetch-competitors.sh
+lock=$repo_root/bench/compare/competitors.lock
+lock_test_dir=$(mktemp -d)
+git_calls=$lock_test_dir/git-calls
+mkdir "$lock_test_dir/bin"
+printf '%s\n' '#!/bin/sh' \
+    "printf '%s\\n' \"\$*\" >>\"\$BENCH_GIT_CALLS\"" 'exit 97' \
+    >"$lock_test_dir/bin/git"
+chmod +x "$lock_test_dir/bin/git"
+
 binary=./build/bench-compare/fhmap
 permuted_binary=./build/bench-compare/fhmap_permuted_hits
 stdout_file=$(mktemp)
 stderr_file=$(mktemp)
-trap 'rm -f "$stdout_file" "$stderr_file"' EXIT HUP INT TERM
+cleanup()
+{
+    rm -f "$stdout_file" "$stderr_file" "$git_calls" \
+        "$lock_test_dir/bin/git"
+    rmdir "$lock_test_dir/bin" "$lock_test_dir" 2>/dev/null || :
+}
+trap cleanup EXIT HUP INT TERM
+
+(
+    cd "$lock_test_dir"
+    BENCH_GIT_CALLS=$git_calls \
+    PATH=$lock_test_dir/bin:$PATH \
+        "$fetcher" --check-lock
+)
+test ! -e "$git_calls"
+test "$(find "$lock_test_dir" -mindepth 1 -maxdepth 1 ! -name bin | wc -l)" -eq 0
+
+awk -F '\t' '
+    BEGIN {
+        split("cc verstable khashl khash mlib stc stb_ds uthash tidwall pottery", names, " ")
+        for (i = 1; i <= 10; ++i) expected[names[i]] = 1
+    }
+    /^$/ || /^#/ { next }
+    {
+        records++
+        if (index($0, "\r") != 0 || NF != 5) exit 1
+        for (i = 1; i <= 5; ++i) {
+            if ($i == "" || $i ~ /^[[:space:]]/ || $i ~ /[[:space:]]$/) exit 1
+        }
+        if (!($1 in expected) || seen_name[$1]++) exit 1
+        if ($2 !~ /^https:\/\/github[.]com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+[.]git$/ ||
+            seen_repository[$2]++) exit 1
+        if (length($3) != 40 || $3 !~ /^[0-9a-f]+$/) exit 1
+        if (!safe_path($4)) exit 1
+        source_count = split($5, sources, ",")
+        if (source_count == 0) exit 1
+        for (i = 1; i <= source_count; ++i) {
+            if (!safe_path(sources[i])) exit 1
+        }
+    }
+    END {
+        if (records != 10) exit 1
+        for (name in expected) {
+            if (seen_name[name] != 1) exit 1
+        }
+    }
+    function safe_path(path, count, parts, i) {
+        if (path == "" || path ~ /^\// || path !~ /^[A-Za-z0-9._\/-]+$/) return 0
+        count = split(path, parts, "/")
+        for (i = 1; i <= count; ++i) {
+            if (parts[i] == "" || parts[i] == "." || parts[i] == "..") return 0
+        }
+        return 1
+    }
+' "$lock"
+
+test "$(awk -F '\t' '!/^#/ && !/^[[:space:]]*$/ { print $1 }' "$lock" |
+    sort -u | wc -l)" -eq 10
+
+expect_bad_fetch_arguments()
+{
+    : >"$stdout_file"
+    : >"$stderr_file"
+    if "$fetcher" "$@" >"$stdout_file" 2>"$stderr_file"; then
+        printf 'fetcher accepted invalid arguments:' >&2
+        printf ' %s' "$@" >&2
+        printf '\n' >&2
+        return 1
+    fi
+    test ! -s "$stdout_file"
+    test -s "$stderr_file"
+}
+
+expect_bad_fetch_arguments
+expect_bad_fetch_arguments --check-lock extra
+expect_bad_fetch_arguments --dest
+expect_bad_fetch_arguments --dest ''
+expect_bad_fetch_arguments --dest /
+expect_bad_fetch_arguments --dest "$lock_test_dir/destination" extra
+expect_bad_fetch_arguments --unknown
 
 output=$($binary --smoke --count 32 --samples 3)
 rows=$(printf '%s\n' "$output" |
