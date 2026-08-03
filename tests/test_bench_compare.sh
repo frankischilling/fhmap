@@ -189,16 +189,19 @@ fi
 for stale_target in pottery test_pottery_adapter
 do
     : >"$partial_build/bench-compare/$stale_target"
-    if make -n BUILD="$partial_build" \
+    if ! make -n BUILD="$partial_build" \
             BENCH_COMPARE_COMPETITORS="$partial_sources" \
             "$partial_build/bench-compare/$stale_target" \
             >"$stdout_file" 2>"$stderr_file"; then
-        printf 'stale Pottery target passed with a missing dependency: %s\n' \
+        printf 'missing Pottery dependency has no fetch path: %s\n' \
             "$stale_target" >&2
         exit 1
     fi
-    grep "No rule to make target.*$missing_pottery_header" \
-        "$stderr_file" >/dev/null
+    if grep 'No rule to make target' "$stderr_file" >/dev/null; then
+        printf 'Pottery dependency bypassed the shared fetch target: %s\n' \
+            "$stale_target" >&2
+        exit 1
+    fi
 done
 
 expect_command_failure()
@@ -213,6 +216,65 @@ expect_command_failure()
     fi
     test -s "$stderr_file"
 }
+
+parallel_build=$fetch_test_dir/parallel-build
+parallel_fetcher=$fetch_test_dir/parallel-fetcher.sh
+parallel_compiler=$fetch_test_dir/parallel-compiler.sh
+parallel_lock=$fetch_test_dir/parallel.lock
+parallel_fetch_log=$fetch_test_dir/parallel-fetch.log
+parallel_fetch_done=$fetch_test_dir/parallel-fetch.done
+parallel_competitors=$parallel_build/competitors
+parallel_files=$(make -pRrq -f Makefile BUILD="$parallel_build" \
+    BENCH_COMPARE_COMPETITORS="$parallel_competitors" : 2>/dev/null |
+    sed -n 's/^BENCH_COMPARE_COMPETITOR_FILES := //p')
+test -n "$parallel_files"
+# shellcheck disable=SC2016
+printf '%s\n' '#!/bin/sh' 'set -eu' \
+    'case ${1-} in' \
+    '    --check-lock) exit 0 ;;' \
+    '    --dest)' \
+    '        test $# -eq 2' \
+    '        printf "fetch\n" >>"$FHMAP_PARALLEL_FETCH_LOG"' \
+    '        for source_file in $FHMAP_PARALLEL_FILES' \
+    '        do' \
+    '            case $source_file in "$2"/*) ;; *) exit 3 ;; esac' \
+    '            mkdir -p "$(dirname -- "$source_file")"' \
+    '            : >"$source_file"' \
+    '        done' \
+    '        : >"$FHMAP_PARALLEL_FETCH_DONE"' \
+    '        exit 0' \
+    '        ;;' \
+    'esac' \
+    'exit 2' >"$parallel_fetcher"
+# shellcheck disable=SC2016
+printf '%s\n' '#!/bin/sh' 'set -eu' \
+    'test -f "$FHMAP_PARALLEL_FETCH_DONE"' \
+    'test -f "$FHMAP_PARALLEL_COMPETITORS/cc/cc.h"' \
+    'sed -n "1p" "$FHMAP_PARALLEL_COMPETITORS/cc/cc.h" >/dev/null' \
+    'output=' \
+    'while test $# -gt 0' \
+    'do' \
+    '    if test "$1" = -o; then' \
+    '        shift' \
+    '        output=$1' \
+    '    fi' \
+    '    shift' \
+    'done' \
+    'test -n "$output"' \
+    'mkdir -p "$(dirname -- "$output")"' \
+    ': >"$output"' >"$parallel_compiler"
+chmod +x "$parallel_fetcher" "$parallel_compiler"
+: >"$parallel_lock"
+FHMAP_PARALLEL_FETCH_LOG=$parallel_fetch_log \
+FHMAP_PARALLEL_FETCH_DONE=$parallel_fetch_done \
+FHMAP_PARALLEL_FILES=$parallel_files \
+FHMAP_PARALLEL_COMPETITORS=$parallel_competitors \
+    make -j8 BUILD="$parallel_build" \
+        BENCH_COMPARE_FETCHER="$parallel_fetcher" \
+        BENCH_COMPARE_LOCK="$parallel_lock" CC="$parallel_compiler" \
+        bench-compare-build >"$stdout_file" 2>"$stderr_file"
+test -f "$parallel_fetch_done"
+test "$(wc -l <"$parallel_fetch_log")" -eq 1
 
 summary_file=$fetch_test_dir/summary
 awk -f "$summarizer" "$valid_bench_fixture" >"$summary_file"
@@ -254,6 +316,82 @@ expect_summary_failure()
 {
     expect_command_failure awk -f "$summarizer" "$1"
 }
+
+available_awks=
+for awk_command in awk mawk nawk gawk
+do
+    if command -v "$awk_command" >/dev/null 2>&1; then
+        available_awks="$available_awks $awk_command"
+    fi
+done
+
+expect_all_awk_failure()
+{
+    for awk_command in $available_awks
+    do
+        expect_command_failure "$awk_command" -f "$summarizer" "$1"
+    done
+}
+
+canonical_boundary=$fetch_test_dir/canonical-boundary.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" }
+    { $7 = "0.001"; $8 = "0.000"; print }
+' "$valid_bench_fixture" >"$canonical_boundary"
+for awk_command in $available_awks
+do
+    "$awk_command" -f "$summarizer" "$canonical_boundary" \
+        >"$summary_file-$awk_command"
+    test "$(grep -c '^rank' "$summary_file-$awk_command")" -eq 176
+    test "$(grep -c '^geomean' "$summary_file-$awk_command")" -eq 11
+done
+canonical_report=$fetch_test_dir/canonical-report.tsv
+cat "$canonical_boundary" "$summary_file-awk" >"$canonical_report"
+for awk_command in $available_awks
+do
+    "$awk_command" -f "$summarizer" "$canonical_report" \
+        >"$summary_file-$awk_command"
+done
+
+geomean_boundary=$fetch_test_dir/geomean-boundary.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" }
+    { $7 = "1000000000.000"; $8 = "0.000"; print }
+' "$valid_bench_fixture" >"$geomean_boundary"
+awk -f "$summarizer" "$geomean_boundary" >"$summary_file-geomean"
+test "$(awk -F '\t' '$1 == "geomean" && $3 == "0.000001" {
+        rows++
+    } END { print rows + 0 }' "$summary_file-geomean")" -eq 11
+geomean_boundary_report=$fetch_test_dir/geomean-boundary-report.tsv
+cat "$geomean_boundary" "$summary_file-geomean" \
+    >"$geomean_boundary_report"
+for awk_command in $available_awks
+do
+    "$awk_command" -f "$summarizer" "$geomean_boundary_report" \
+        >"$summary_file-$awk_command"
+done
+
+geomean_underflow=$fetch_test_dir/geomean-underflow.tsv
+awk -F '\t' 'BEGIN { OFS = "\t" }
+    { $7 = "999999999999999999.999"; print }
+' "$valid_bench_fixture" >"$geomean_underflow"
+expect_all_awk_failure "$geomean_underflow"
+
+for primary_value in 00.001 01.000 1 1.00 1.0000 1e0 +1.000 0.000
+do
+    invalid_primary=$fetch_test_dir/invalid-primary-$primary_value.tsv
+    awk -F '\t' -v value="$primary_value" 'BEGIN { OFS = "\t" }
+        NR == 1 { $7 = value } { print }
+    ' "$valid_bench_fixture" >"$invalid_primary"
+    expect_all_awk_failure "$invalid_primary"
+done
+
+for dispersion_value in 00.000 01.000 0 0.00 0.0000 0e0 +0.000
+do
+    invalid_dispersion=$fetch_test_dir/invalid-dispersion-$dispersion_value.tsv
+    awk -F '\t' -v value="$dispersion_value" 'BEGIN { OFS = "\t" }
+        NR == 1 { $8 = value } { print }
+    ' "$valid_bench_fixture" >"$invalid_dispersion"
+    expect_all_awk_failure "$invalid_dispersion"
+done
 
 expect_summary_failure "$failed_bench_fixture"
 
@@ -967,6 +1105,37 @@ done
 awk -f "$summarizer" "$comparison_report" >"$summary_file"
 test "$(grep -c '^rank' "$summary_file")" -eq 352
 test "$(grep -c '^geomean' "$summary_file")" -eq 11
+for awk_command in $available_awks
+do
+    "$awk_command" -f "$summarizer" "$comparison_report" \
+        >"$summary_file-$awk_command"
+    cmp "$summary_file" "$summary_file-$awk_command"
+done
+
+for rank_field in 6 7
+do
+    for rank_value in 00.001 01.000 1 1.00 1.0000 1e0 +1.000 0.000
+    do
+        invalid_rank=$fetch_test_dir/invalid-rank-$rank_field-$rank_value.tsv
+        awk -F '\t' -v field="$rank_field" -v value="$rank_value" '
+            BEGIN { OFS = "\t" }
+            $1 == "rank" && !changed { $field = value; changed = 1 }
+            { print }
+        ' "$comparison_report" >"$invalid_rank"
+        expect_all_awk_failure "$invalid_rank"
+    done
+done
+
+for geomean_value in 00.000001 01.000000 1 1.00000 1.0000000 1e0 \
+    +1.000000 0.000000
+do
+    invalid_geomean=$fetch_test_dir/invalid-geomean-$geomean_value.tsv
+    awk -F '\t' -v value="$geomean_value" 'BEGIN { OFS = "\t" }
+        $1 == "geomean" && !changed { $3 = value; changed = 1 }
+        { print }
+    ' "$comparison_report" >"$invalid_geomean"
+    expect_all_awk_failure "$invalid_geomean"
+done
 
 duplicate_rank=$fetch_test_dir/duplicate-rank.tsv
 cp "$comparison_report" "$duplicate_rank"
@@ -1132,6 +1301,8 @@ expect_runner_failure FHMAP_BENCH_COUNTS=1,bad
 expect_runner_failure FHMAP_BENCH_COUNTS="$overflow_uint64"
 expect_runner_failure FHMAP_BENCH_COUNTS=00
 expect_runner_failure FHMAP_BENCH_COUNTS="$max_uint64,$max_uint64"
+expect_runner_failure FHMAP_BENCH_COUNTS="$max_uint64" \
+    FHMAP_BENCH_SAMPLES=1
 expect_runner_failure FHMAP_BENCH_COUNTS=1 \
     FHMAP_BENCH_SAMPLES=00
 expect_runner_failure FHMAP_BENCH_COUNTS=1 \
@@ -1146,6 +1317,20 @@ expect_runner_failure FHMAP_BENCH_COUNTS=1 FHMAP_BENCH_SAMPLES=1 \
     FHMAP_BENCH_CPU="$overflow_uint64"
 expect_runner_failure FHMAP_BENCH_COUNTS=1 FHMAP_BENCH_SAMPLES=1 \
     FHMAP_BENCH_CPU=1048575
+
+malformed_path=$fetch_test_dir/malformed-path
+mkdir "$malformed_path"
+# shellcheck disable=SC2016
+printf '%s\n' '#!/bin/sh' 'set -eu' \
+    'test "$1" = -c' \
+    'shift 2' \
+    'if test "$1" = true; then exec "$@"; fi' \
+    '"$@" | awk '\''BEGIN { OFS = "\t" }' \
+    '    NR == 1 { $1 = "malformed" } { print }'\''' \
+    >"$malformed_path/taskset"
+chmod +x "$malformed_path/taskset"
+expect_runner_failure PATH="$malformed_path:$PATH" \
+    FHMAP_BENCH_COUNTS=1 FHMAP_BENCH_SAMPLES=1 FHMAP_BENCH_CPU=0
 
 test -n "$pottery_boundary_output"
 printf '%s\n' "$pottery_boundary_output" | awk -F '\t' '

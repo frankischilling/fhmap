@@ -59,7 +59,8 @@ $1 == "rank" {
     if (NF != 7 || !canonical_positive_uint64($2) ||
         !($3 in kind_known) ||
         !($4 in workload_known) || !($5 in map_known) ||
-        !positive_metric($6) || !positive_metric($7)) {
+        !canonical_metric($6, 3, 0) ||
+        !canonical_metric($7, 3, 0)) {
         fail("invalid rank row")
     }
     summary_key = $2 SUBSEP $3 SUBSEP $4 SUBSEP $5
@@ -71,7 +72,8 @@ $1 == "rank" {
 }
 
 $1 == "geomean" {
-    if (NF != 3 || !($2 in map_known) || !positive_metric($3))
+    if (NF != 3 || !($2 in map_known) ||
+        !canonical_metric($3, 6, 0))
         fail("invalid geometric mean row")
     if (geomean_seen[$2]++) fail("duplicate geometric mean row")
     geomean_value[$2] = $3
@@ -87,8 +89,8 @@ $1 == "geomean" {
     if (!canonical_positive_uint64($5) ||
         !canonical_positive_uint64($6))
         fail("invalid count or sample count")
-    if (!positive_metric($7)) fail("invalid primary metric")
-    if (!nonnegative_metric($8)) fail("invalid dispersion metric")
+    if (!canonical_metric($7, 3, 0)) fail("invalid primary metric")
+    if (!canonical_metric($8, 3, 1)) fail("invalid dispersion metric")
     if ($9 != "ok") fail("non-ok primary row")
     for (i = 10; i <= 15; ++i) {
         if (!canonical_uint64($i)) fail("invalid result accounting")
@@ -155,6 +157,8 @@ END {
         map = map_order[mi]
         geometric_mean = exp(log_throughput[map] / total_scenarios)
         geometric_text = sprintf("%.6f", geometric_mean)
+        if (geometric_text == "0.000000")
+            fail_end("geometric mean is too small to report")
         if (geomean_rows != 0 && geomean_value[map] != geometric_text)
             fail_end("geometric mean mismatch")
         printf "geomean\t%s\t%s\n", map, geometric_text
@@ -227,13 +231,19 @@ function decimal_greater(left, right) {
     return ("x" left) > ("x" right)
 }
 
-function nonnegative_metric(value) {
-    return value ~ /^[0-9]+([.][0-9]+)?$/ && length(value) <= 24 &&
-           (value + 0) >= 0 && (value + 0) < 1e18
-}
-
-function positive_metric(value) {
-    return nonnegative_metric(value) && (value + 0) > 0
+function canonical_metric(value, digits, allow_zero, part_count, parts,
+                          integer, fraction) {
+    part_count = split(value, parts, ".")
+    if (part_count != 2) return 0
+    integer = parts[1]
+    fraction = parts[2]
+    if (integer !~ /^(0|[1-9][0-9]*)$/ || length(integer) > 18)
+        return 0
+    if (fraction !~ /^[0-9]+$/ || length(fraction) != digits)
+        return 0
+    if (!allow_zero && integer == "0" && fraction ~ /^0+$/)
+        return 0
+    return 1
 }
 
 function fail(message) {

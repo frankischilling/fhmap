@@ -76,7 +76,32 @@ done
 command -v "$bench_cc" >/dev/null 2>&1 || fail 'benchmark compiler not found'
 test -r "$lock_file" || fail 'competitor lock file not found'
 test -r "$summarizer" || fail 'benchmark summarizer not found'
-"$script_dir/fetch-competitors.sh" --check-lock
+
+temp_parent=$(CDPATH='' cd -- "${TMPDIR:-/tmp}" && pwd -P) ||
+    fail 'could not open the temporary directory'
+temp_dir=$(mktemp -d "$temp_parent/fhmap-comparison.XXXXXX") ||
+    fail 'could not create a temporary directory'
+metadata_file=$temp_dir/metadata.tsv
+result_file=$temp_dir/results.tsv
+summary_file=$temp_dir/summary.tsv
+validated_summary_file=$temp_dir/validated-summary.tsv
+report_file=$temp_dir/report.tsv
+lock_stdout_file=$temp_dir/lock-check.stdout
+
+cleanup()
+{
+    case $temp_dir in
+        "$temp_parent"/fhmap-comparison.??????)
+            rm -f "$metadata_file" "$result_file" "$summary_file" \
+                "$validated_summary_file" "$report_file" \
+                "$lock_stdout_file"
+            rmdir "$temp_dir" 2>/dev/null || true
+            ;;
+    esac
+}
+trap cleanup EXIT HUP INT TERM
+
+"$script_dir/fetch-competitors.sh" --check-lock >"$lock_stdout_file"
 for map in $maps
 do
     test -x "$build_dir/$map" || fail "adapter binary not found: $map"
@@ -89,21 +114,6 @@ if command -v taskset >/dev/null 2>&1 &&
 elif test "${FHMAP_BENCH_CPU+x}" = x; then
     fail "requested CPU is unavailable: $pin_cpu"
 fi
-
-temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/fhmap-comparison.XXXXXX") ||
-    fail 'could not create a temporary directory'
-result_file=$temp_dir/results.tsv
-
-cleanup()
-{
-    case $temp_dir in
-        "${TMPDIR:-/tmp}"/fhmap-comparison.??????)
-            rm -f "$result_file"
-            rmdir "$temp_dir" 2>/dev/null || true
-            ;;
-    esac
-}
-trap cleanup EXIT HUP INT TERM
 
 uname_value=$(uname -a) || fail 'could not read system information'
 cpu_model=$(awk -F ':' '
@@ -130,9 +140,10 @@ emit_metadata()
 {
     metadata_value=$(printf '%s' "$2" | tr '\t\r\n' '   ')
     test -n "$metadata_value" || fail "empty metadata value: $1"
-    printf 'meta\t%s\t%s\n' "$1" "$metadata_value"
+    printf 'meta\t%s\t%s\n' "$1" "$metadata_value" >>"$metadata_file"
 }
 
+: >"$metadata_file"
 emit_metadata format fhmap-benchmark-v1
 emit_metadata uname "$uname_value"
 emit_metadata cpu_model "$cpu_model"
@@ -180,5 +191,9 @@ do
     test -n "$remaining_counts" || break
 done
 
-cat "$result_file"
-awk -f "$summarizer" "$result_file"
+awk -f "$summarizer" "$metadata_file" "$result_file" >"$summary_file"
+cat "$metadata_file" "$result_file" "$summary_file" >"$report_file"
+awk -f "$summarizer" "$report_file" >"$validated_summary_file"
+cmp -s "$summary_file" "$validated_summary_file" ||
+    fail 'summary changed during report validation'
+cat "$report_file"

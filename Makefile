@@ -12,6 +12,7 @@ BENCH_COMPARE_SRC := $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
 	$(BENCH_ALLOC_SRC) $(BENCH_COMPARE_ADAPTER_SRC)
 BENCH_COMPARE_BUILD := $(BUILD)/bench-compare
 BENCH_COMPARE_COMPETITORS := $(BUILD)/competitors
+BENCH_COMPARE_FETCH_STAMP := $(BUILD)/.bench-compare-fetch.stamp
 BENCH_COMPARE_FHMAP := $(BENCH_COMPARE_BUILD)/fhmap
 BENCH_COMPARE_CC := $(BENCH_COMPARE_BUILD)/cc
 BENCH_COMPARE_VERSTABLE := $(BENCH_COMPARE_BUILD)/verstable
@@ -116,6 +117,15 @@ BENCH_COMPARE_TYPED_HEADERS := $(BENCH_COMPARE_MLIB_HEADERS) \
 	$(BENCH_COMPARE_STB_DS_HEADERS) $(BENCH_COMPARE_STC_HEADERS) \
 	$(BENCH_COMPARE_UTHASH_HEADERS) $(BENCH_COMPARE_TIDWALL_SOURCES) \
 	$(BENCH_COMPARE_POTTERY_HEADERS)
+BENCH_COMPARE_COMPETITOR_FILES := \
+	$(BENCH_COMPARE_COMPETITORS)/cc/cc.h \
+	$(BENCH_COMPARE_COMPETITORS)/verstable/verstable.h \
+	$(BENCH_COMPARE_COMPETITORS)/khashl/khashl.h \
+	$(BENCH_COMPARE_COMPETITORS)/khash/khash.h \
+	$(BENCH_COMPARE_TYPED_HEADERS)
+BENCH_COMPARE_MISSING_FILES := $(filter-out \
+	$(wildcard $(BENCH_COMPARE_COMPETITOR_FILES)), \
+	$(BENCH_COMPARE_COMPETITOR_FILES))
 ifeq ($(sort $(BENCH_COMPARE_TYPED_HEADERS)),\
 	$(sort $(wildcard $(BENCH_COMPARE_TYPED_HEADERS))))
 BENCH_COMPARE_TYPED_AVAILABLE := 1
@@ -206,7 +216,7 @@ BENCH_COMPARE_TEST_BINS := $(BENCH_COMPARE_MLIB_TEST) \
 	$(BENCH_COMPARE_KHASHL_FAULT_CSTR) \
 	$(BENCH_COMPARE_KHASH_RESERVE_TEST) \
 	$(BENCH_COMPARE_KHASHL_RESERVE_TEST) $(BENCH_COMPARE_PERMUTED)
-BENCH_COMPARE_FETCHER := bench/compare/fetch-competitors.sh
+BENCH_COMPARE_FETCHER := ./bench/compare/fetch-competitors.sh
 BENCH_COMPARE_LOCK := bench/compare/competitors.lock
 BENCH_COMPARE_CFLAGS := $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native
 BENCH_SRC := bench/bench_fhmap.c
@@ -216,7 +226,7 @@ export FHMAP_BENCH_CFLAGS = $(BENCH_COMPARE_CFLAGS)
 
 .PHONY: all test clang-test sanitize bench bench-compare-lock \
 	bench-compare-fetch bench-compare-build bench-compare-smoke \
-	bench-compare clean
+	bench-compare-fetch-force bench-compare clean
 
 all: test
 
@@ -871,8 +881,24 @@ $(BENCH_COMPARE_PERMUTED): $(BENCH_COMPARE_SRC) \
 bench-compare-lock: $(BENCH_COMPARE_FETCHER) $(BENCH_COMPARE_LOCK)
 	sh $(BENCH_COMPARE_FETCHER) --check-lock
 
-bench-compare-fetch: bench-compare-lock | $(BUILD)
-	./$(BENCH_COMPARE_FETCHER) --dest $(BUILD)/competitors
+bench-compare-fetch-force:
+
+$(BENCH_COMPARE_FETCH_STAMP): $(BENCH_COMPARE_FETCHER) \
+		$(BENCH_COMPARE_LOCK) bench-compare-fetch-force | $(BUILD)
+	sh $(BENCH_COMPARE_FETCHER) --check-lock
+	$(BENCH_COMPARE_FETCHER) --dest $(BENCH_COMPARE_COMPETITORS)
+	touch $@
+
+$(BENCH_COMPARE_MISSING_FILES): | $(BENCH_COMPARE_FETCH_STAMP)
+	@test -f "$@" || { \
+		printf 'missing fetched competitor file: %s\n' "$@" >&2; \
+		exit 1; \
+	}
+
+$(BENCH_COMPARE_BINS) $(BENCH_COMPARE_TEST_BINS): | \
+		$(BENCH_COMPARE_FETCH_STAMP)
+
+bench-compare-fetch: $(BENCH_COMPARE_FETCH_STAMP)
 
 bench-compare-build: bench-compare-fetch $(BENCH_COMPARE_BINS)
 
