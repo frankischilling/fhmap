@@ -111,7 +111,6 @@ expect_bad_fetch_arguments
 expect_bad_fetch_arguments --check-lock extra
 expect_bad_fetch_arguments --dest
 expect_bad_fetch_arguments --dest ''
-expect_bad_fetch_arguments --dest /
 expect_bad_fetch_arguments --dest -unsafe
 expect_bad_fetch_arguments --dest "$fetch_test_dir/destination" extra
 expect_bad_fetch_arguments --unknown
@@ -242,12 +241,33 @@ checkout_state()
     "$real_git" -C "$checkout" diff --binary | cksum
 }
 
-if test -d /proc/self/root && test ! -e /cc && test ! -L /cc; then
+if test ! -e /cc && test ! -L /cc &&
+        test ! -e /.fhmap-fetch-cc && test ! -L /.fhmap-fetch-cc; then
     : >"$fixture_git_calls"
-    expect_fixture_failure --dest /proc/self/root
+    if BENCH_REAL_GIT=$real_git \
+            BENCH_GIT_CALLS=$fixture_git_calls \
+            BENCH_FAIL_MATCH=' clone ' \
+            "$fixture_bin/git" clone --version >/dev/null 2>&1; then
+        exit 1
+    else
+        intercept_status=$?
+    fi
+    test "$intercept_status" -eq 89
+    test "$(sed -n '1p' "$fixture_git_calls")" = 'clone --version'
+
+    : >"$fixture_git_calls"
+    fixture_fail_match=' clone '
+    expect_fixture_failure --dest /
     test ! -s "$fixture_git_calls"
+    if test -d /proc/self/root; then
+        expect_fixture_failure --dest /proc/self/root
+        test ! -s "$fixture_git_calls"
+    fi
+    fixture_fail_match=
     test ! -e /cc
     test ! -L /cc
+    test ! -e /.fhmap-fetch-cc
+    test ! -L /.fhmap-fetch-cc
 fi
 
 fixture_destination=$fixture_dir/destination
