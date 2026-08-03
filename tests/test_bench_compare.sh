@@ -603,6 +603,8 @@ expect_khashl_init_failure \
 expect_khashl_init_failure \
     ./build/bench-compare/khashl_init_fail_cstr cstr
 
+./build/bench-compare/test_khash_reserve
+
 expect_bad_arguments()
 {
     : >"$stdout_file"
