@@ -33,6 +33,15 @@ typedef struct bench_sample_result {
     size_t capacity;
 } bench_sample_result;
 
+typedef struct bench_prepared_values {
+    uint64_t *original;
+    uint64_t *updated;
+    uint64_t original_checksum;
+    uint64_t updated_checksum;
+    uint64_t key_checksum;
+    uint64_t miss_checksum;
+} bench_prepared_values;
+
 static const char *const bench_workload_names[BENCH_WORKLOAD_COUNT] = {
     "insert_reserved",
     "insert_growing",
@@ -48,7 +57,7 @@ static const char *bench_key_kind_name(bench_key_kind kind)
     return kind == BENCH_KEYS_U64 ? "u64" : "cstr";
 }
 
-static bool bench_parse_u64(const char *text, uint64_t limit,
+static bool bench_parse_u64(const char *text, uint64_t limit, bool allow_zero,
                             uint64_t *result)
 {
     uint64_t value = 0;
@@ -64,7 +73,7 @@ static bool bench_parse_u64(const char *text, uint64_t limit,
         value = value * UINT64_C(10) + digit;
         ++cursor;
     }
-    if (value == 0) return false;
+    if (!allow_zero && value == 0) return false;
     *result = value;
     return true;
 }
@@ -96,7 +105,8 @@ static bool bench_parse_options(int argc, char **argv, bench_options *options)
         }
         if (strcmp(option, "--count") == 0) {
             if (count_seen || index + 1 >= argc ||
-                !bench_parse_u64(argv[++index], (uint64_t)SIZE_MAX, &value)) {
+                !bench_parse_u64(argv[++index], (uint64_t)SIZE_MAX, false,
+                                 &value)) {
                 goto invalid;
             }
             count_seen = true;
@@ -105,7 +115,8 @@ static bool bench_parse_options(int argc, char **argv, bench_options *options)
         }
         if (strcmp(option, "--samples") == 0) {
             if (samples_seen || index + 1 >= argc ||
-                !bench_parse_u64(argv[++index], (uint64_t)SIZE_MAX, &value)) {
+                !bench_parse_u64(argv[++index], (uint64_t)SIZE_MAX, false,
+                                 &value)) {
                 goto invalid;
             }
             samples_seen = true;
@@ -114,7 +125,7 @@ static bool bench_parse_options(int argc, char **argv, bench_options *options)
         }
         if (strcmp(option, "--seed") == 0) {
             if (seed_seen || index + 1 >= argc ||
-                !bench_parse_u64(argv[++index], UINT64_MAX, &value)) {
+                !bench_parse_u64(argv[++index], UINT64_MAX, true, &value)) {
                 goto invalid;
             }
             seed_seen = true;
@@ -149,14 +160,50 @@ static bool bench_adapter_is_complete(void)
            bench_adapter.capacity != NULL && bench_adapter.destroy != NULL;
 }
 
-static uint64_t bench_value_at(const bench_dataset *data, size_t index,
-                               bool updated)
+static void bench_prepared_values_destroy(bench_prepared_values *values)
 {
-    const uint64_t version = updated
-                                 ? UINT64_C(0xa4093822299f31d0)
-                                 : UINT64_C(0x13198a2e03707344);
+    if (values == NULL) return;
+    free(values->updated);
+    free(values->original);
+    *values = (bench_prepared_values){0};
+}
 
-    return bench_mix64(data->u64_keys[index] ^ data->seed ^ version);
+static bool bench_prepared_values_init(bench_prepared_values *values,
+                                       const bench_dataset *data)
+{
+    const uint64_t original_version = UINT64_C(0x13198a2e03707344);
+    const uint64_t updated_version = UINT64_C(0xa4093822299f31d0);
+    bench_prepared_values prepared = {0};
+    size_t bytes;
+    size_t index;
+
+    if (values == NULL || data == NULL || data->count == 0u ||
+        data->count > SIZE_MAX / sizeof(*prepared.original)) {
+        return false;
+    }
+    bytes = data->count * sizeof(*prepared.original);
+    prepared.original = (uint64_t *)malloc(bytes);
+    prepared.updated = (uint64_t *)malloc(bytes);
+    if (prepared.original == NULL || prepared.updated == NULL) {
+        bench_prepared_values_destroy(&prepared);
+        return false;
+    }
+    for (index = 0; index < data->count; ++index) {
+        prepared.original[index] =
+            bench_mix64(data->u64_keys[index] ^ data->seed ^ original_version);
+        prepared.updated[index] =
+            bench_mix64(data->u64_keys[index] ^ data->seed ^ updated_version);
+        prepared.original_checksum = bench_checksum_add(
+            prepared.original_checksum, prepared.original[index]);
+        prepared.updated_checksum = bench_checksum_add(
+            prepared.updated_checksum, prepared.updated[index]);
+        prepared.key_checksum = bench_checksum_add(prepared.key_checksum,
+                                                   data->u64_keys[index]);
+        prepared.miss_checksum = bench_checksum_add(prepared.miss_checksum,
+                                                    data->u64_misses[index]);
+    }
+    *values = prepared;
+    return true;
 }
 
 static bool bench_put_item(void *map, bench_key_kind kind,
@@ -215,41 +262,17 @@ static bool bench_wrong_kind_is_safe(void *map, bench_key_kind kind)
     return bench_adapter.size(map) == 0u;
 }
 
-static uint64_t bench_values_checksum(const bench_dataset *data, bool updated)
-{
-    uint64_t checksum = 0;
-    size_t index;
-
-    for (index = 0; index < data->count; ++index) {
-        checksum = bench_checksum_add(checksum,
-                                      bench_value_at(data, index, updated));
-    }
-    return checksum;
-}
-
-static uint64_t bench_keys_checksum(const bench_dataset *data, bool miss)
-{
-    uint64_t checksum = 0;
-    size_t index;
-
-    for (index = 0; index < data->count; ++index) {
-        checksum = bench_checksum_add(checksum,
-                                      miss ? data->u64_misses[index]
-                                           : data->u64_keys[index]);
-    }
-    return checksum;
-}
-
 static bool bench_populate(void *map, bench_key_kind kind,
-                           const bench_dataset *data)
+                           const bench_dataset *data,
+                           const bench_prepared_values *values)
 {
     size_t index;
 
     for (index = 0; index < data->count; ++index) {
         bool inserted = false;
 
-        if (!bench_put_item(map, kind, data, index,
-                            bench_value_at(data, index, false), &inserted) ||
+        if (!bench_put_item(map, kind, data, index, values->original[index],
+                            &inserted) ||
             !inserted) {
             return false;
         }
@@ -258,8 +281,9 @@ static bool bench_populate(void *map, bench_key_kind kind,
 }
 
 static bool bench_validate_contents(void *map, bench_key_kind kind,
-                                    const bench_dataset *data, bool empty,
-                                    bool updated)
+                                    const bench_dataset *data,
+                                    const bench_prepared_values *values,
+                                    bool empty, bool updated)
 {
     uint64_t iteration_checksum = 0;
     size_t seen = 0;
@@ -273,33 +297,35 @@ static bool bench_validate_contents(void *map, bench_key_kind kind,
             if (bench_get_item(map, kind, data, index, false, &value))
                 return false;
         } else if (!bench_get_item(map, kind, data, index, false, &value) ||
-                   value != bench_value_at(data, index, updated)) {
+                   value != (updated ? values->updated[index]
+                                     : values->original[index])) {
             return false;
         }
         if (bench_get_item(map, kind, data, index, true, &value)) return false;
     }
     if (!bench_adapter.iterate(map, &iteration_checksum, &seen)) return false;
     return seen == (empty ? 0u : data->count) &&
-           iteration_checksum == (empty ? UINT64_C(0)
-                                         : bench_values_checksum(data,
-                                                                 updated));
+           iteration_checksum ==
+               (empty ? UINT64_C(0)
+                      : (updated ? values->updated_checksum
+                                 : values->original_checksum));
 }
 
-static uint64_t bench_expected_checksum(const bench_dataset *data,
+static uint64_t bench_expected_checksum(const bench_prepared_values *values,
                                         bench_workload workload)
 {
     switch (workload) {
         case BENCH_UPDATE:
-            return bench_values_checksum(data, true);
+            return values->updated_checksum;
         case BENCH_LOOKUP_MISS:
-            return bench_keys_checksum(data, true);
+            return values->miss_checksum;
         case BENCH_ERASE:
-            return bench_keys_checksum(data, false);
+            return values->key_checksum;
         case BENCH_INSERT_RESERVED:
         case BENCH_INSERT_GROWING:
         case BENCH_LOOKUP_HIT:
         case BENCH_ITERATE:
-            return bench_values_checksum(data, false);
+            return values->original_checksum;
         case BENCH_WORKLOAD_COUNT:
             break;
     }
@@ -309,6 +335,7 @@ static uint64_t bench_expected_checksum(const bench_dataset *data,
 static bool bench_execute_workload(void *map, bench_key_kind kind,
                                    bench_workload workload,
                                    const bench_dataset *data,
+                                   const bench_prepared_values *values,
                                    uint64_t *checksum, double *elapsed)
 {
     uint64_t result = 0;
@@ -323,28 +350,26 @@ static bool bench_execute_workload(void *map, bench_key_kind kind,
         case BENCH_INSERT_RESERVED:
         case BENCH_INSERT_GROWING:
             for (index = 0; index < data->count; ++index) {
-                const uint64_t value = bench_value_at(data, index, false);
                 bool inserted = false;
 
-                if (!bench_put_item(map, kind, data, index, value, &inserted) ||
+                if (!bench_put_item(map, kind, data, index,
+                                    values->original[index], &inserted) ||
                     !inserted) {
                     ok = false;
                     break;
                 }
-                result = bench_checksum_add(result, value);
             }
             break;
         case BENCH_UPDATE:
             for (index = 0; index < data->count; ++index) {
-                const uint64_t value = bench_value_at(data, index, true);
                 bool inserted = true;
 
-                if (!bench_put_item(map, kind, data, index, value, &inserted) ||
+                if (!bench_put_item(map, kind, data, index,
+                                    values->updated[index], &inserted) ||
                     inserted) {
                     ok = false;
                     break;
                 }
-                result = bench_checksum_add(result, value);
             }
             break;
         case BENCH_LOOKUP_HIT:
@@ -352,11 +377,10 @@ static bool bench_execute_workload(void *map, bench_key_kind kind,
                 uint64_t value = 0;
 
                 if (!bench_get_item(map, kind, data, index, false, &value) ||
-                    value != bench_value_at(data, index, false)) {
+                    value != values->original[index]) {
                     ok = false;
                     break;
                 }
-                result = bench_checksum_add(result, value);
             }
             break;
         case BENCH_LOOKUP_MISS:
@@ -367,7 +391,6 @@ static bool bench_execute_workload(void *map, bench_key_kind kind,
                     ok = false;
                     break;
                 }
-                result = bench_checksum_add(result, data->u64_misses[index]);
             }
             break;
         case BENCH_ERASE:
@@ -376,7 +399,6 @@ static bool bench_execute_workload(void *map, bench_key_kind kind,
                     ok = false;
                     break;
                 }
-                result = bench_checksum_add(result, data->u64_keys[index]);
             }
             break;
         case BENCH_ITERATE: {
@@ -394,6 +416,9 @@ static bool bench_execute_workload(void *map, bench_key_kind kind,
     }
     finish = bench_seconds_now();
     if (!(finish > 0.0) || !isfinite(finish) || finish < start) return false;
+    if (workload != BENCH_ITERATE) {
+        result = bench_expected_checksum(values, workload);
+    }
     *checksum = result;
     *elapsed = finish - start;
     return ok;
@@ -411,6 +436,7 @@ static bool bench_sample_matches(const bench_sample_result *left,
 }
 
 static bool bench_run_sample(const bench_dataset *data, bench_key_kind kind,
+                             const bench_prepared_values *values,
                              bench_workload workload, double *nanoseconds,
                              bench_sample_result *sample)
 {
@@ -442,20 +468,20 @@ static bool bench_run_sample(const bench_dataset *data, bench_key_kind kind,
         failure = "reserve failed";
         goto cleanup;
     }
-    if (!insert_workload && !bench_populate(map, kind, data)) {
+    if (!insert_workload && !bench_populate(map, kind, data, values)) {
         failure = "map setup failed";
         goto cleanup;
     }
-    if (!bench_execute_workload(map, kind, workload, data, &checksum,
+    if (!bench_execute_workload(map, kind, workload, data, values, &checksum,
                                 &elapsed)) {
         failure = "timed operation or clock failed";
         goto cleanup;
     }
-    if (checksum != bench_expected_checksum(data, workload)) {
+    if (checksum != bench_expected_checksum(values, workload)) {
         failure = "workload checksum mismatch";
         goto cleanup;
     }
-    if (!bench_validate_contents(map, kind, data, final_empty,
+    if (!bench_validate_contents(map, kind, data, values, final_empty,
                                  final_updated)) {
         failure = "final map validation failed";
         goto cleanup;
@@ -493,6 +519,7 @@ cleanup:
 
 static bool bench_run_scenario(const bench_options *options,
                                const bench_dataset *data,
+                               const bench_prepared_values *values,
                                bench_key_kind kind,
                                bench_workload workload)
 {
@@ -516,8 +543,8 @@ static bool bench_run_scenario(const bench_options *options,
     for (sample_index = 0; sample_index < options->samples; ++sample_index) {
         bench_sample_result current;
 
-        if (!bench_run_sample(data, kind, workload, &samples[sample_index],
-                              &current)) {
+        if (!bench_run_sample(data, kind, values, workload,
+                              &samples[sample_index], &current)) {
             free(samples);
             return false;
         }
@@ -557,6 +584,7 @@ int main(int argc, char **argv)
 {
     bench_options options;
     bench_dataset data = BENCH_DATASET_ZERO;
+    bench_prepared_values values = {0};
     unsigned kind_index;
     unsigned workload_index;
 
@@ -569,6 +597,11 @@ int main(int argc, char **argv)
         fputs("could not allocate benchmark dataset\n", stderr);
         return 1;
     }
+    if (!bench_prepared_values_init(&values, &data)) {
+        fputs("could not allocate prepared benchmark values\n", stderr);
+        bench_dataset_destroy(&data);
+        return 1;
+    }
     for (kind_index = 0; kind_index < 2u; ++kind_index) {
         const bench_key_kind kind = kind_index == 0u ? BENCH_KEYS_U64
                                                      : BENCH_KEYS_CSTR;
@@ -576,13 +609,15 @@ int main(int argc, char **argv)
         for (workload_index = 0;
              workload_index < (unsigned)BENCH_WORKLOAD_COUNT;
              ++workload_index) {
-            if (!bench_run_scenario(&options, &data, kind,
+            if (!bench_run_scenario(&options, &data, &values, kind,
                                     (bench_workload)workload_index)) {
+                bench_prepared_values_destroy(&values);
                 bench_dataset_destroy(&data);
                 return 1;
             }
         }
     }
+    bench_prepared_values_destroy(&values);
     bench_dataset_destroy(&data);
     return 0;
 }
