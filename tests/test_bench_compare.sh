@@ -3,6 +3,7 @@
 set -eu
 
 binary=./build/bench-compare/fhmap
+permuted_binary=./build/bench-compare/fhmap_permuted_hits
 stdout_file=$(mktemp)
 stderr_file=$(mktemp)
 trap 'rm -f "$stdout_file" "$stderr_file"' EXIT HUP INT TERM
@@ -147,5 +148,12 @@ expect_bad_arguments --count 16 --count 32
 expect_bad_arguments --samples 2 --samples 3
 expect_bad_arguments --seed 1 --seed 2
 expect_bad_arguments --smoke --smoke
+
+if "$permuted_binary" --smoke --count 32 --samples 1 \
+        >"$stdout_file" 2>"$stderr_file"; then
+    printf 'accepted permuted lookup-hit values\n' >&2
+    exit 1
+fi
+grep 'lookup_hit: timed operation result mismatch' "$stderr_file" >/dev/null
 
 printf 'benchmark comparison smoke tests passed\n'

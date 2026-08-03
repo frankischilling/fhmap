@@ -12,6 +12,7 @@ BENCH_COMPARE_SRC := $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
 	$(BENCH_ALLOC_SRC) $(BENCH_COMPARE_ADAPTER_SRC)
 BENCH_COMPARE_BUILD := $(BUILD)/bench-compare
 BENCH_COMPARE_FHMAP := $(BENCH_COMPARE_BUILD)/fhmap
+BENCH_COMPARE_PERMUTED := $(BENCH_COMPARE_BUILD)/fhmap_permuted_hits
 BENCH_SRC := bench/bench_fhmap.c
 
 .PHONY: all test clang-test sanitize bench bench-compare-smoke clean
@@ -82,7 +83,15 @@ $(BENCH_COMPARE_FHMAP): $(BENCH_COMPARE_SRC) \
 	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native \
 		$(BENCH_COMPARE_SRC) -o $@
 
-bench-compare-smoke: $(BENCH_COMPARE_FHMAP)
+$(BENCH_COMPARE_PERMUTED): $(BENCH_COMPARE_SRC) \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h fhmap.h | $(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG \
+		-DFHMAP_BENCH_TEST_PERMUTE_LOOKUP_HITS \
+		$(BENCH_COMPARE_SRC) -o $@
+
+bench-compare-smoke: $(BENCH_COMPARE_FHMAP) $(BENCH_COMPARE_PERMUTED)
 	sh tests/test_bench_compare.sh
 
 $(BUILD)/bench_fhmap: $(BENCH_SRC) fhmap.h | $(BUILD)
