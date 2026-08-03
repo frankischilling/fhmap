@@ -83,9 +83,13 @@ and 3 inserts, in a fixed interleaved order. The driver rounds the churn
 operation count up to a complete 20-operation block. Erase and insert pairs
 keep the live set stable.
 
-Datasets, miss keys, and values come from the selected seed. The driver checks
-operation counts, values, final size, iteration checksums, and final contents
-outside the timer.
+The count fixes the integer members: keys are the first `count` even `u64`
+values, and misses are their paired odd successors. The seed changes the shared
+shuffle order, not those sets. C string keys and misses are fixed-width
+hexadecimal encodings of the mixed, shuffled integers. The seed is also an
+input to the generated original and updated values. The driver checks operation
+counts, values, final size, iteration checksums, and final contents outside the
+timer.
 
 ## Report format
 
@@ -221,39 +225,58 @@ and median/MAD reporting reduce common sources of noise, but they do not remove
 host load, frequency scaling, kernel, compiler, or microarchitecture effects.
 
 Use a separate checkout to reproduce the reference report without moving the
-branch in your working repository. The checkout below starts from `main`, then
-creates the recorded branch at commit
-`623d9a2f1570cd8a80c4a4dfbb762c94f1cbd353`. The destination must not already
-exist.
+branch in your working repository. The recipe stops if its sibling destination
+already exists. It starts the new checkout from `main`, then creates the
+recorded branch at commit
+`623d9a2f1570cd8a80c4a4dfbb762c94f1cbd353`.
 
 ```sh
-source_repo=$(git rev-parse --show-toplevel)
-baseline_checkout=../fhmap-benchmark-baseline
-git clone --no-local --branch main "$source_repo" "$baseline_checkout"
-cd "$baseline_checkout"
-git switch -c perf/issue-1-benchmark-suite \
-  623d9a2f1570cd8a80c4a4dfbb762c94f1cbd353
+(
+  set -eu
 
-baseline_cflags='-std=c11 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -O3 -DNDEBUG -march=native'
-make CC=cc BENCH_COMPARE_CFLAGS="$baseline_cflags" bench-compare-fetch
-make CC=cc BENCH_COMPARE_CFLAGS="$baseline_cflags" bench-compare-build
-mkdir -p bench/results
-FHMAP_BENCH_COUNTS=32,4096,262144,1048576 \
-FHMAP_BENCH_SAMPLES=9 \
-FHMAP_BENCH_SEED=7640891576956012809 \
-FHMAP_BENCH_CPU=0 \
-FHMAP_BENCH_CC=cc \
-FHMAP_BENCH_CFLAGS="$baseline_cflags" \
-  ./bench/compare/run-comparison.sh \
-  > bench/results/2026-08-02-i9-10900f-gcc13-baseline.tsv
+  source_repo=$(git rev-parse --show-toplevel)
+  source_parent=$(dirname "$source_repo")
+  baseline_checkout=$source_parent/fhmap-benchmark-baseline
+  test ! -e "$baseline_checkout"
+  baseline_commit=623d9a2f1570cd8a80c4a4dfbb762c94f1cbd353
+  git -C "$source_repo" cat-file -e "$baseline_commit^{commit}"
+
+  git clone --no-local --branch main "$source_repo" "$baseline_checkout"
+  cd "$baseline_checkout"
+  git switch -c perf/issue-1-benchmark-suite "$baseline_commit"
+
+  baseline_cflags='-std=c11 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -O3 -DNDEBUG -march=native'
+  make CC=cc BENCH_COMPARE_CFLAGS="$baseline_cflags" bench-compare-fetch
+  make CC=cc BENCH_COMPARE_CFLAGS="$baseline_cflags" bench-compare-build
+
+  report_dir=$baseline_checkout/bench/results
+  final_report=$report_dir/2026-08-02-i9-10900f-gcc13-baseline.tsv
+  mkdir -p "$report_dir"
+  test ! -e "$final_report"
+  temporary_report=$(mktemp "$report_dir/.fhmap-baseline.XXXXXX")
+  trap 'rm -f "$temporary_report"' EXIT
+  trap 'exit 1' HUP INT TERM
+
+  FHMAP_BENCH_COUNTS=32,4096,262144,1048576 \
+  FHMAP_BENCH_SAMPLES=9 \
+  FHMAP_BENCH_SEED=7640891576956012809 \
+  FHMAP_BENCH_CPU=0 \
+  FHMAP_BENCH_CC=cc \
+  FHMAP_BENCH_CFLAGS="$baseline_cflags" \
+    ./bench/compare/run-comparison.sh >"$temporary_report"
+  test ! -e "$final_report"
+  mv "$temporary_report" "$final_report"
+  trap - EXIT HUP INT TERM
+)
 ```
 
 Matching the recorded host metadata also requires the CPU, kernel, and compiler
 listed below. CPU 0 must be available to `taskset`. The compiler command is
 `cc`, and the first line from `cc --version` must be
-`cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`. The commands set the recorded
-flags, seed, and CPU explicitly. A different host or toolchain produces a valid
-report with different metadata and timing values.
+`cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`. The recipe sets the recorded
+flags, seed, and CPU explicitly. It writes the named report only after the
+runner succeeds. A different host or toolchain produces a valid report with
+different metadata and timing values.
 
 ## Pre-optimization baseline
 
