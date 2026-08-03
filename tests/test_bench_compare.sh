@@ -28,10 +28,16 @@ for expected_binary in \
     test_mlib_adapter_clang test_stc_adapter_clang \
     test_stb_ds_adapter_clang \
     test_stb_ds_seed_clang \
+    uthash_clang tidwall_clang pottery_clang \
+    test_uthash_adapter_clang test_tidwall_adapter_clang \
+    test_pottery_adapter_clang \
     mlib_sanitize stc_sanitize stb_ds_sanitize \
     test_mlib_adapter_sanitize test_stc_adapter_sanitize \
     test_stb_ds_adapter_sanitize \
-    test_stb_ds_seed_sanitize
+    test_stb_ds_seed_sanitize \
+    uthash_sanitize tidwall_sanitize pottery_sanitize \
+    test_uthash_adapter_sanitize test_tidwall_adapter_sanitize \
+    test_pottery_adapter_sanitize
 do
     grep "build/bench-compare/$expected_binary" "$typed_matrix_plan" \
         >/dev/null
@@ -43,9 +49,23 @@ make -B -n \
     clang-test sanitize >"$missing_matrix_plan"
 test "$(grep -c 'typed competitor sources are absent; skipping' \
     "$missing_matrix_plan")" -eq 2
-if grep -E 'build/bench-compare/(test_)?(mlib|stc|stb_ds).*_(clang|sanitize)' \
+if grep -E 'build/bench-compare/(test_)?(mlib|stc|stb_ds|uthash|tidwall|pottery).*_(clang|sanitize)' \
         "$missing_matrix_plan" >/dev/null; then
     printf 'typed adapter matrix was planned without competitor sources\n' >&2
+    exit 1
+fi
+
+partial_sources=$fetch_test_dir/partial-sources
+partial_matrix_plan=$fetch_test_dir/partial-matrix-plan
+mkdir -p "$partial_sources/uthash/src"
+: >"$partial_sources/uthash/src/uthash.h"
+make -B -n BENCH_COMPARE_COMPETITORS="$partial_sources" \
+    clang-test sanitize >"$partial_matrix_plan"
+test "$(grep -c 'typed competitor sources are absent; skipping' \
+    "$partial_matrix_plan")" -eq 2
+if grep -E 'build/bench-compare/(test_)?(mlib|stc|stb_ds|uthash|tidwall|pottery).*_(clang|sanitize)' \
+        "$partial_matrix_plan" >/dev/null; then
+    printf 'typed adapter matrix was planned with partial sources\n' >&2
     exit 1
 fi
 
@@ -609,7 +629,7 @@ check_adapter_output()
     '
 }
 
-for adapter_name in cc verstable khashl khash mlib stc stb_ds
+for adapter_name in cc verstable khashl khash mlib stc stb_ds uthash tidwall pottery
 do
     adapter_binary=./build/bench-compare/$adapter_name
     test -x "$adapter_binary"
@@ -631,6 +651,9 @@ done
 ./build/bench-compare/test_stc_adapter
 ./build/bench-compare/test_stb_ds_adapter
 ./build/bench-compare/test_stb_ds_seed
+./build/bench-compare/test_uthash_adapter
+./build/bench-compare/test_tidwall_adapter
+./build/bench-compare/test_pottery_adapter
 
 expect_khashl_init_failure()
 {

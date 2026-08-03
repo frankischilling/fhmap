@@ -20,12 +20,19 @@ BENCH_COMPARE_KHASH := $(BENCH_COMPARE_BUILD)/khash
 BENCH_COMPARE_MLIB := $(BENCH_COMPARE_BUILD)/mlib
 BENCH_COMPARE_STC := $(BENCH_COMPARE_BUILD)/stc
 BENCH_COMPARE_STB_DS := $(BENCH_COMPARE_BUILD)/stb_ds
+BENCH_COMPARE_UTHASH := $(BENCH_COMPARE_BUILD)/uthash
+BENCH_COMPARE_TIDWALL := $(BENCH_COMPARE_BUILD)/tidwall
+BENCH_COMPARE_POTTERY := $(BENCH_COMPARE_BUILD)/pottery
+BENCH_COMPARE_TIDWALL_OBJ := $(BENCH_COMPARE_BUILD)/tidwall_hashmap.o
 BENCH_COMPARE_TYPED_TEST_SRC := tests/test_typed_adapter.c
 BENCH_COMPARE_MLIB_TEST := $(BENCH_COMPARE_BUILD)/test_mlib_adapter
 BENCH_COMPARE_STC_TEST := $(BENCH_COMPARE_BUILD)/test_stc_adapter
 BENCH_COMPARE_STB_DS_TEST := $(BENCH_COMPARE_BUILD)/test_stb_ds_adapter
 BENCH_COMPARE_STB_DS_SEED_TEST_SRC := tests/test_stb_ds_seed.c
 BENCH_COMPARE_STB_DS_SEED_TEST := $(BENCH_COMPARE_BUILD)/test_stb_ds_seed
+BENCH_COMPARE_UTHASH_TEST := $(BENCH_COMPARE_BUILD)/test_uthash_adapter
+BENCH_COMPARE_TIDWALL_TEST := $(BENCH_COMPARE_BUILD)/test_tidwall_adapter
+BENCH_COMPARE_POTTERY_TEST := $(BENCH_COMPARE_BUILD)/test_pottery_adapter
 BENCH_COMPARE_MLIB_HEADERS := \
 	$(BENCH_COMPARE_COMPETITORS)/mlib/m-array.h \
 	$(BENCH_COMPARE_COMPETITORS)/mlib/m-core.h \
@@ -42,13 +49,24 @@ BENCH_COMPARE_STC_HEADERS := \
 	$(BENCH_COMPARE_COMPETITORS)/stc/include/stc/priv/template2.h \
 	$(BENCH_COMPARE_COMPETITORS)/stc/include/stc/sys/finalize.h \
 	$(BENCH_COMPARE_COMPETITORS)/stc/include/stc/types.h
+BENCH_COMPARE_UTHASH_HEADERS := \
+	$(BENCH_COMPARE_COMPETITORS)/uthash/src/uthash.h
+BENCH_COMPARE_TIDWALL_SOURCES := \
+	$(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.h \
+	$(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.c
+BENCH_COMPARE_POTTERY_HEADERS := \
+	$(BENCH_COMPARE_COMPETITORS)/pottery/include/pottery/pottery_dependencies.h \
+	$(BENCH_COMPARE_COMPETITORS)/pottery/include/pottery/open_hash_map/pottery_open_hash_map_static.t.h \
+	$(BENCH_COMPARE_COMPETITORS)/pottery/include/pottery/open_hash_map/impl/pottery_open_hash_map_definitions.t.h
 BENCH_COMPARE_TYPED_COMMON_DEPS := $(BENCH_COMPARE_DRIVER_SRC) \
 	$(BENCH_COMMON_SRC) $(BENCH_ALLOC_SRC) \
 	bench/compare/common/bench_adapter.h \
 	bench/compare/common/bench_common.h \
 	bench/compare/common/bench_alloc.h
 BENCH_COMPARE_TYPED_HEADERS := $(BENCH_COMPARE_MLIB_HEADERS) \
-	$(BENCH_COMPARE_STB_DS_HEADERS) $(BENCH_COMPARE_STC_HEADERS)
+	$(BENCH_COMPARE_STB_DS_HEADERS) $(BENCH_COMPARE_STC_HEADERS) \
+	$(BENCH_COMPARE_UTHASH_HEADERS) $(BENCH_COMPARE_TIDWALL_SOURCES) \
+	$(BENCH_COMPARE_POTTERY_HEADERS)
 ifeq ($(sort $(BENCH_COMPARE_TYPED_HEADERS)),\
 	$(sort $(wildcard $(BENCH_COMPARE_TYPED_HEADERS))))
 BENCH_COMPARE_TYPED_AVAILABLE := 1
@@ -66,6 +84,17 @@ BENCH_COMPARE_STB_DS_TEST_CLANG := \
 	$(BENCH_COMPARE_BUILD)/test_stb_ds_adapter_clang
 BENCH_COMPARE_STB_DS_SEED_TEST_CLANG := \
 	$(BENCH_COMPARE_BUILD)/test_stb_ds_seed_clang
+BENCH_COMPARE_UTHASH_CLANG := $(BENCH_COMPARE_BUILD)/uthash_clang
+BENCH_COMPARE_TIDWALL_CLANG := $(BENCH_COMPARE_BUILD)/tidwall_clang
+BENCH_COMPARE_POTTERY_CLANG := $(BENCH_COMPARE_BUILD)/pottery_clang
+BENCH_COMPARE_TIDWALL_OBJ_CLANG := \
+	$(BENCH_COMPARE_BUILD)/tidwall_hashmap_clang.o
+BENCH_COMPARE_UTHASH_TEST_CLANG := \
+	$(BENCH_COMPARE_BUILD)/test_uthash_adapter_clang
+BENCH_COMPARE_TIDWALL_TEST_CLANG := \
+	$(BENCH_COMPARE_BUILD)/test_tidwall_adapter_clang
+BENCH_COMPARE_POTTERY_TEST_CLANG := \
+	$(BENCH_COMPARE_BUILD)/test_pottery_adapter_clang
 BENCH_COMPARE_MLIB_SANITIZE := $(BENCH_COMPARE_BUILD)/mlib_sanitize
 BENCH_COMPARE_STC_SANITIZE := $(BENCH_COMPARE_BUILD)/stc_sanitize
 BENCH_COMPARE_STB_DS_SANITIZE := $(BENCH_COMPARE_BUILD)/stb_ds_sanitize
@@ -77,18 +106,39 @@ BENCH_COMPARE_STB_DS_TEST_SANITIZE := \
 	$(BENCH_COMPARE_BUILD)/test_stb_ds_adapter_sanitize
 BENCH_COMPARE_STB_DS_SEED_TEST_SANITIZE := \
 	$(BENCH_COMPARE_BUILD)/test_stb_ds_seed_sanitize
+BENCH_COMPARE_UTHASH_SANITIZE := $(BENCH_COMPARE_BUILD)/uthash_sanitize
+BENCH_COMPARE_TIDWALL_SANITIZE := $(BENCH_COMPARE_BUILD)/tidwall_sanitize
+BENCH_COMPARE_POTTERY_SANITIZE := $(BENCH_COMPARE_BUILD)/pottery_sanitize
+BENCH_COMPARE_TIDWALL_OBJ_SANITIZE := \
+	$(BENCH_COMPARE_BUILD)/tidwall_hashmap_sanitize.o
+BENCH_COMPARE_UTHASH_TEST_SANITIZE := \
+	$(BENCH_COMPARE_BUILD)/test_uthash_adapter_sanitize
+BENCH_COMPARE_TIDWALL_TEST_SANITIZE := \
+	$(BENCH_COMPARE_BUILD)/test_tidwall_adapter_sanitize
+BENCH_COMPARE_POTTERY_TEST_SANITIZE := \
+	$(BENCH_COMPARE_BUILD)/test_pottery_adapter_sanitize
 ifeq ($(BENCH_COMPARE_TYPED_AVAILABLE),1)
 BENCH_COMPARE_TYPED_CLANG := $(BENCH_COMPARE_MLIB_CLANG) \
 	$(BENCH_COMPARE_STC_CLANG) $(BENCH_COMPARE_STB_DS_CLANG) \
 	$(BENCH_COMPARE_MLIB_TEST_CLANG) $(BENCH_COMPARE_STC_TEST_CLANG) \
 	$(BENCH_COMPARE_STB_DS_TEST_CLANG) \
-	$(BENCH_COMPARE_STB_DS_SEED_TEST_CLANG)
+	$(BENCH_COMPARE_STB_DS_SEED_TEST_CLANG) \
+	$(BENCH_COMPARE_UTHASH_CLANG) $(BENCH_COMPARE_TIDWALL_CLANG) \
+	$(BENCH_COMPARE_POTTERY_CLANG) \
+	$(BENCH_COMPARE_UTHASH_TEST_CLANG) \
+	$(BENCH_COMPARE_TIDWALL_TEST_CLANG) \
+	$(BENCH_COMPARE_POTTERY_TEST_CLANG)
 BENCH_COMPARE_TYPED_SANITIZE := $(BENCH_COMPARE_MLIB_SANITIZE) \
 	$(BENCH_COMPARE_STC_SANITIZE) $(BENCH_COMPARE_STB_DS_SANITIZE) \
 	$(BENCH_COMPARE_MLIB_TEST_SANITIZE) \
 	$(BENCH_COMPARE_STC_TEST_SANITIZE) \
 	$(BENCH_COMPARE_STB_DS_TEST_SANITIZE) \
-	$(BENCH_COMPARE_STB_DS_SEED_TEST_SANITIZE)
+	$(BENCH_COMPARE_STB_DS_SEED_TEST_SANITIZE) \
+	$(BENCH_COMPARE_UTHASH_SANITIZE) $(BENCH_COMPARE_TIDWALL_SANITIZE) \
+	$(BENCH_COMPARE_POTTERY_SANITIZE) \
+	$(BENCH_COMPARE_UTHASH_TEST_SANITIZE) \
+	$(BENCH_COMPARE_TIDWALL_TEST_SANITIZE) \
+	$(BENCH_COMPARE_POTTERY_TEST_SANITIZE)
 endif
 BENCH_COMPARE_KHASHL_FAULT_U64 := \
 	$(BENCH_COMPARE_BUILD)/khashl_init_fail_u64
@@ -154,6 +204,12 @@ ifeq ($(BENCH_COMPARE_TYPED_AVAILABLE),1)
 	$(BENCH_COMPARE_STC_TEST_CLANG)
 	$(BENCH_COMPARE_STB_DS_TEST_CLANG)
 	$(BENCH_COMPARE_STB_DS_SEED_TEST_CLANG)
+	$(BENCH_COMPARE_UTHASH_CLANG) --smoke --count 32 --samples 3 >/dev/null
+	$(BENCH_COMPARE_TIDWALL_CLANG) --smoke --count 32 --samples 3 >/dev/null
+	$(BENCH_COMPARE_POTTERY_CLANG) --smoke --count 32 --samples 3 >/dev/null
+	$(BENCH_COMPARE_UTHASH_TEST_CLANG)
+	$(BENCH_COMPARE_TIDWALL_TEST_CLANG)
+	$(BENCH_COMPARE_POTTERY_TEST_CLANG)
 else
 	@printf 'typed competitor sources are absent; skipping Clang matrix\n'
 endif
@@ -193,6 +249,21 @@ ifeq ($(BENCH_COMPARE_TYPED_AVAILABLE),1)
 		$(BENCH_COMPARE_STB_DS_TEST_SANITIZE)
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
 		$(BENCH_COMPARE_STB_DS_SEED_TEST_SANITIZE)
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(BENCH_COMPARE_UTHASH_SANITIZE) --smoke --count 32 --samples 3 \
+		>/dev/null
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(BENCH_COMPARE_TIDWALL_SANITIZE) --smoke --count 32 --samples 3 \
+		>/dev/null
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(BENCH_COMPARE_POTTERY_SANITIZE) --smoke --count 32 --samples 3 \
+		>/dev/null
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(BENCH_COMPARE_UTHASH_TEST_SANITIZE)
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(BENCH_COMPARE_TIDWALL_TEST_SANITIZE)
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(BENCH_COMPARE_POTTERY_TEST_SANITIZE)
 else
 	@printf 'typed competitor sources are absent; skipping sanitizer matrix\n'
 endif
@@ -287,6 +358,89 @@ $(BENCH_COMPARE_STB_DS): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/stb_ds \
 		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
 		$(BENCH_ALLOC_SRC) bench/compare/adapters/stb_ds_adapter.c -o $@
+
+$(BENCH_COMPARE_UTHASH): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/uthash_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/uthash/src/uthash.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/uthash/src \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/uthash_adapter.c -o $@
+
+$(BENCH_COMPARE_UTHASH_TEST): tests/test_uthash_adapter.c \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/uthash_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/uthash/src/uthash.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/uthash/src \
+		tests/test_uthash_adapter.c $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/uthash_adapter.c -o $@
+
+$(BENCH_COMPARE_TIDWALL_OBJ): \
+		$(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.c \
+		$(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) -std=c11 -Wall -Wextra -Wpedantic -O3 -DNDEBUG \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
+		-c $(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.c -o $@
+
+$(BENCH_COMPARE_TIDWALL): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/tidwall_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.h \
+		$(BENCH_COMPARE_TIDWALL_OBJ) | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/tidwall_adapter.c \
+		$(BENCH_COMPARE_TIDWALL_OBJ) -o $@
+
+$(BENCH_COMPARE_TIDWALL_TEST): tests/test_tidwall_adapter.c \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/tidwall_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.h \
+		$(BENCH_COMPARE_TIDWALL_OBJ) | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
+		tests/test_tidwall_adapter.c $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/tidwall_adapter.c \
+		$(BENCH_COMPARE_TIDWALL_OBJ) \
+		-Wl,--wrap=bench_malloc -o $@
+
+$(BENCH_COMPARE_POTTERY): $(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/pottery_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_common.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/pottery/include/pottery/open_hash_map/pottery_open_hash_map_static.t.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O3 -DNDEBUG -march=native -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/pottery/include \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/pottery_adapter.c -o $@
+
+$(BENCH_COMPARE_POTTERY_TEST): tests/test_pottery_adapter.c \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/pottery_adapter.c \
+		bench/compare/common/bench_adapter.h \
+		bench/compare/common/bench_alloc.h \
+		$(BENCH_COMPARE_COMPETITORS)/pottery/include/pottery/open_hash_map/pottery_open_hash_map_static.t.h | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/pottery/include \
+		tests/test_pottery_adapter.c $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/pottery_adapter.c \
+		-Wl,--wrap=bench_malloc -Wl,--wrap=bench_calloc -o $@
 
 $(BENCH_COMPARE_MLIB_TEST): $(BENCH_COMPARE_TYPED_TEST_SRC) \
 		$(BENCH_COMPARE_TYPED_COMMON_DEPS) \
@@ -387,6 +541,66 @@ $(BENCH_COMPARE_STB_DS_SEED_TEST_CLANG): \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/stb_ds \
 		$(BENCH_COMPARE_STB_DS_SEED_TEST_SRC) $(BENCH_ALLOC_SRC) -o $@
 
+$(BENCH_COMPARE_UTHASH_CLANG): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		bench/compare/adapters/uthash_adapter.c \
+		$(BENCH_COMPARE_UTHASH_HEADERS) | $(BENCH_COMPARE_BUILD)
+	clang $(CFLAGS_COMMON) -O3 -DNDEBUG -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/uthash/src \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/uthash_adapter.c -o $@
+
+$(BENCH_COMPARE_TIDWALL_OBJ_CLANG): $(BENCH_COMPARE_TIDWALL_SOURCES) | \
+		$(BENCH_COMPARE_BUILD)
+	clang -std=c11 -Wall -Wextra -Wpedantic -O3 -DNDEBUG \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
+		-c $(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.c -o $@
+
+$(BENCH_COMPARE_TIDWALL_CLANG): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		bench/compare/adapters/tidwall_adapter.c \
+		$(BENCH_COMPARE_TIDWALL_SOURCES) \
+		$(BENCH_COMPARE_TIDWALL_OBJ_CLANG) | $(BENCH_COMPARE_BUILD)
+	clang $(CFLAGS_COMMON) -O3 -DNDEBUG -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/tidwall_adapter.c \
+		$(BENCH_COMPARE_TIDWALL_OBJ_CLANG) -o $@
+
+$(BENCH_COMPARE_POTTERY_CLANG): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		bench/compare/adapters/pottery_adapter.c \
+		$(BENCH_COMPARE_POTTERY_HEADERS) | $(BENCH_COMPARE_BUILD)
+	clang $(CFLAGS_COMMON) -O3 -DNDEBUG -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/pottery/include \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/pottery_adapter.c -o $@
+
+$(BENCH_COMPARE_UTHASH_TEST_CLANG): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		tests/test_uthash_adapter.c bench/compare/adapters/uthash_adapter.c \
+		$(BENCH_COMPARE_UTHASH_HEADERS) | $(BENCH_COMPARE_BUILD)
+	clang $(CFLAGS_COMMON) -O1 -g -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/uthash/src \
+		tests/test_uthash_adapter.c $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/uthash_adapter.c -o $@
+
+$(BENCH_COMPARE_TIDWALL_TEST_CLANG): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		tests/test_tidwall_adapter.c bench/compare/adapters/tidwall_adapter.c \
+		$(BENCH_COMPARE_TIDWALL_SOURCES) \
+		$(BENCH_COMPARE_TIDWALL_OBJ_CLANG) | $(BENCH_COMPARE_BUILD)
+	clang $(CFLAGS_COMMON) -O1 -g -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
+		tests/test_tidwall_adapter.c $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/tidwall_adapter.c \
+		$(BENCH_COMPARE_TIDWALL_OBJ_CLANG) \
+		-Wl,--wrap=bench_malloc -o $@
+
+$(BENCH_COMPARE_POTTERY_TEST_CLANG): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		tests/test_pottery_adapter.c bench/compare/adapters/pottery_adapter.c \
+		$(BENCH_COMPARE_POTTERY_HEADERS) | $(BENCH_COMPARE_BUILD)
+	clang $(CFLAGS_COMMON) -O1 -g -Werror \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/pottery/include \
+		tests/test_pottery_adapter.c $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/pottery_adapter.c \
+		-Wl,--wrap=bench_malloc -Wl,--wrap=bench_calloc -o $@
+
 $(BENCH_COMPARE_MLIB_SANITIZE): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
 		bench/compare/adapters/mlib_adapter.c \
 		$(BENCH_COMPARE_MLIB_HEADERS) | $(BENCH_COMPARE_BUILD)
@@ -454,6 +668,73 @@ $(BENCH_COMPARE_STB_DS_SEED_TEST_SANITIZE): \
 		-fsanitize=address,undefined \
 		-isystem $(BENCH_COMPARE_COMPETITORS)/stb_ds \
 		$(BENCH_COMPARE_STB_DS_SEED_TEST_SRC) $(BENCH_ALLOC_SRC) -o $@
+
+$(BENCH_COMPARE_UTHASH_SANITIZE): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		bench/compare/adapters/uthash_adapter.c \
+		$(BENCH_COMPARE_UTHASH_HEADERS) | $(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror -fno-omit-frame-pointer \
+		-fsanitize=address,undefined \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/uthash/src \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/uthash_adapter.c -o $@
+
+$(BENCH_COMPARE_TIDWALL_OBJ_SANITIZE): $(BENCH_COMPARE_TIDWALL_SOURCES) | \
+		$(BENCH_COMPARE_BUILD)
+	$(CC) -std=c11 -Wall -Wextra -Wpedantic -O1 -g \
+		-fno-omit-frame-pointer -fsanitize=address,undefined \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
+		-c $(BENCH_COMPARE_COMPETITORS)/tidwall/hashmap.c -o $@
+
+$(BENCH_COMPARE_TIDWALL_SANITIZE): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		bench/compare/adapters/tidwall_adapter.c \
+		$(BENCH_COMPARE_TIDWALL_SOURCES) \
+		$(BENCH_COMPARE_TIDWALL_OBJ_SANITIZE) | $(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror -fno-omit-frame-pointer \
+		-fsanitize=address,undefined \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/tidwall_adapter.c \
+		$(BENCH_COMPARE_TIDWALL_OBJ_SANITIZE) -o $@
+
+$(BENCH_COMPARE_POTTERY_SANITIZE): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		bench/compare/adapters/pottery_adapter.c \
+		$(BENCH_COMPARE_POTTERY_HEADERS) | $(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror -fno-omit-frame-pointer \
+		-fsanitize=address,undefined \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/pottery/include \
+		$(BENCH_COMPARE_DRIVER_SRC) $(BENCH_COMMON_SRC) \
+		$(BENCH_ALLOC_SRC) bench/compare/adapters/pottery_adapter.c -o $@
+
+$(BENCH_COMPARE_UTHASH_TEST_SANITIZE): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		tests/test_uthash_adapter.c bench/compare/adapters/uthash_adapter.c \
+		$(BENCH_COMPARE_UTHASH_HEADERS) | $(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror -fno-omit-frame-pointer \
+		-fsanitize=address,undefined \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/uthash/src \
+		tests/test_uthash_adapter.c $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/uthash_adapter.c -o $@
+
+$(BENCH_COMPARE_TIDWALL_TEST_SANITIZE): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		tests/test_tidwall_adapter.c bench/compare/adapters/tidwall_adapter.c \
+		$(BENCH_COMPARE_TIDWALL_SOURCES) \
+		$(BENCH_COMPARE_TIDWALL_OBJ_SANITIZE) | $(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror -fno-omit-frame-pointer \
+		-fsanitize=address,undefined \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/tidwall \
+		tests/test_tidwall_adapter.c $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/tidwall_adapter.c \
+		$(BENCH_COMPARE_TIDWALL_OBJ_SANITIZE) \
+		-Wl,--wrap=bench_malloc -o $@
+
+$(BENCH_COMPARE_POTTERY_TEST_SANITIZE): $(BENCH_COMPARE_TYPED_COMMON_DEPS) \
+		tests/test_pottery_adapter.c bench/compare/adapters/pottery_adapter.c \
+		$(BENCH_COMPARE_POTTERY_HEADERS) | $(BENCH_COMPARE_BUILD)
+	$(CC) $(CFLAGS_COMMON) -O1 -g -Werror -fno-omit-frame-pointer \
+		-fsanitize=address,undefined \
+		-isystem $(BENCH_COMPARE_COMPETITORS)/pottery/include \
+		tests/test_pottery_adapter.c $(BENCH_ALLOC_SRC) \
+		bench/compare/adapters/pottery_adapter.c \
+		-Wl,--wrap=bench_malloc -Wl,--wrap=bench_calloc -o $@
 
 $(BENCH_COMPARE_KHASHL_FAULT_U64): tests/test_khashl_init_fault.c \
 		$(BENCH_COMPARE_DRIVER_SRC) \
@@ -533,10 +814,16 @@ bench-compare-smoke: bench-compare-lock $(BENCH_COMPARE_FHMAP) \
 		$(BENCH_COMPARE_MLIB) \
 		$(BENCH_COMPARE_STC) \
 		$(BENCH_COMPARE_STB_DS) \
+		$(BENCH_COMPARE_UTHASH) \
+		$(BENCH_COMPARE_TIDWALL) \
+		$(BENCH_COMPARE_POTTERY) \
 		$(BENCH_COMPARE_MLIB_TEST) \
 		$(BENCH_COMPARE_STC_TEST) \
 		$(BENCH_COMPARE_STB_DS_TEST) \
 		$(BENCH_COMPARE_STB_DS_SEED_TEST) \
+		$(BENCH_COMPARE_UTHASH_TEST) \
+		$(BENCH_COMPARE_TIDWALL_TEST) \
+		$(BENCH_COMPARE_POTTERY_TEST) \
 		$(BENCH_COMPARE_KHASHL_FAULT_U64) \
 		$(BENCH_COMPARE_KHASHL_FAULT_CSTR) \
 		$(BENCH_COMPARE_KHASH_RESERVE_TEST) \
