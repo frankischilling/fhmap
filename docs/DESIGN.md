@@ -51,14 +51,15 @@ control bytes, then advances by 16 and wraps with a bit mask. For each group:
 3. If no candidate matches, stop when the group contains an empty byte.
    Tombstones do not stop a lookup.
 
-With default byte equality, a successful lookup can return before computing
-an empty mask. An equal key cannot lie beyond an empty bucket along its probe
-sequence, because insertion uses the first available slot. Fingerprint
-collisions still require full key equality.
+Lookup masks out candidate fingerprints beyond the first empty bucket before
+comparing keys. The prefix mask uses unsigned subtraction and XOR, avoiding a
+bit scan, variable shift, and conditional branch. When there is no empty byte,
+unsigned wraparound leaves every candidate bit enabled. The first empty byte
+itself cannot match a fingerprint.
 
-Custom equality may read borrowed strings or other external storage. Those
-lookups mask out candidates beyond the first empty bucket before calling the
-callback, avoiding unnecessary pointer reads on misses.
+Keeping this boundary matters for borrowed strings and other custom equality
+functions: a spurious candidate can otherwise require an extra pointer read
+and an expensive comparison.
 
 At normal load factors, a missing lookup commonly ends after one group and no
 full key comparisons. Fingerprints have a 1/128 accidental match probability

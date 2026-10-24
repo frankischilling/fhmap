@@ -550,15 +550,13 @@ FHMAP_INLINE size_t fhmap__find_index_hashed(const fhmap *map, const void *key,
     size_t scanned = 0;
 
     while (scanned < map->capacity) {
+        uint32_t empty = fhmap__group_match(map->control + position,
+                                            FHMAP_CONTROL_EMPTY);
         uint32_t matches = fhmap__group_match(map->control + position,
                                               fingerprint);
-        /* Custom equality may chase pointers or compare long strings. Avoid
-           calling it for fingerprints beyond the first empty bucket. */
-        if (matches != 0u && map->equal != NULL) {
-            uint32_t empty = fhmap__group_match(map->control + position,
-                                                FHMAP_CONTROL_EMPTY);
-            if (empty != 0u) matches &= empty ^ (empty - 1u);
-        }
+        /* Keep bits through the first empty byte. That byte cannot match a
+           fingerprint; if there is no empty byte, unsigned wrap keeps all bits. */
+        matches &= empty ^ (empty - 1u);
         while (matches != 0u) {
             unsigned bit = fhmap__first_bit(matches);
             size_t index = (position + bit) & (map->capacity - 1u);
@@ -567,10 +565,7 @@ FHMAP_INLINE size_t fhmap__find_index_hashed(const fhmap *map, const void *key,
             }
             matches &= matches - 1u;
         }
-        /* A matching key cannot lie past an empty bucket in its probe
-           sequence. Check candidates first, avoiding the empty mask on hits. */
-        if (fhmap__group_match(map->control + position,
-                              FHMAP_CONTROL_EMPTY) != 0u) return FHMAP_NPOS;
+        if (empty != 0u) return FHMAP_NPOS;
         position = (position + FHMAP_GROUP_WIDTH) & (map->capacity - 1u);
         scanned += FHMAP_GROUP_WIDTH;
     }

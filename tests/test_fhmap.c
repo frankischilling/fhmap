@@ -306,22 +306,28 @@ static bool counted_equal(const void *stored, const void *query, size_t size, vo
 
 static void test_custom_equality_stops_at_empty(void)
 {
-    size_t start, offset;
+    size_t start, stop, offset;
     for (start = 0; start < 64; ++start) {
-        for (offset = 1; offset < 16; ++offset) {
+        for (stop = 0; stop < 16; ++stop) {
             fhmap map;
             unsigned comparisons = 0;
             fhmap_config cfg = fhmap_config_make(sizeof(uint64_t), sizeof(uint64_t));
-            uint64_t stored = (uint64_t)((start + offset) % 64) * 128u + 37u;
-            uint64_t missing = (uint64_t)start * 128u + 37u;
+            uint64_t stored, missing = ((uint64_t)start * 128u + 37u) | (UINT64_C(1) << 32);
             cfg.initial_capacity = 56;
             cfg.hash = identity_hash;
             cfg.equal = counted_equal;
             cfg.user = &comparisons;
             assert(fhmap_init(&map, &cfg));
-            assert(fhmap_put(&map, &stored, &stored) == FHMAP_PUT_INSERTED);
+            for (offset = 0; offset < 16; ++offset) {
+                if (offset == stop) continue;
+                stored = (uint64_t)((start + offset) % 64) * 128u + 37u;
+                assert(fhmap_put(&map, &stored, &stored) == FHMAP_PUT_INSERTED);
+            }
+            comparisons = 0;
             assert(fhmap_get(&map, &missing) == NULL);
-            assert(comparisons == 0);
+            assert(comparisons == stop);
+            stored = (uint64_t)((start + (stop == 0 ? 1u : 0u)) % 64) * 128u + 37u;
+            comparisons = 0;
             assert(*(uint64_t *)fhmap_get(&map, &stored) == stored);
             assert(comparisons == 1);
             fhmap_destroy(&map);
