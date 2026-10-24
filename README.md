@@ -194,6 +194,14 @@ distribution, and load factor can change results substantially.
 
 ## Saved comparison results
 
+The control-byte probe changes measured an 8.2% aggregate throughput gain in
+three paired rounds on an AMD EPYC 9V74 host with GCC 14.2. Table allocation
+metrics were unchanged, but some scenarios were slower. See the
+[measurements and regressions](docs/BENCHMARKS.md#control-byte-probe-measurements-october-2026)
+and the [raw paired report](bench/results/2026-10-24-probes-paired.json).
+
+### Earlier cross-library runs
+
 On the reference Intel i9-10900F host, fhmap ranked eighth of eleven in both
 saved full comparisons. Its equal-weight geomean was `26.108846` Mops/s in the
 [baseline](bench/results/2026-08-02-i9-10900f-gcc13-baseline.tsv) and

@@ -474,3 +474,49 @@ Paired runs reduce timing drift but do not remove shared-host interference or
 frequency changes. A comparison against the same executable can still report
 an apparent gain. Do not call a small aggregate difference an optimization
 without checking repeated results and the affected workloads.
+
+## Control-byte probe measurements, October 2026
+
+The [paired report](../bench/results/2026-10-24-probes-paired.json) compares
+`1167cb0c5dc32b497061101d065cd13521600e8e` with the probe changes at
+`de000a15f929eed20ae0ec81977920e5bdc7dba1`. Both binaries used GCC 14.2,
+`-O3 -DNDEBUG -march=native`, on an AMD EPYC 9V74 host pinned to CPU 0.
+The candidate also used `-Werror`, which changes diagnostics rather than
+optimization. Executable and header hashes are recorded in the report.
+
+There were three alternating rounds, nine samples per scenario, and the four
+default counts. Across the 64 scenarios, the geometric mean of the median
+paired speedup ratios was **1.0821x**, or 8.2% higher throughput. Forty-four
+scenario medians improved. This is a shared-host observation, not a guarantee
+for another machine or workload.
+
+The following ratios combine the four counts for each key type and operation.
+Values above 1 favor the candidate.
+
+| Operation | u64 | C string |
+|---|---:|---:|
+| Reserved insertion | 1.041x | 1.019x |
+| Growing insertion | 1.181x | 1.121x |
+| Update | 1.001x | 1.005x |
+| Successful lookup | 1.049x | 1.048x |
+| Failed lookup | 1.479x | 1.346x |
+| Erase | 1.040x | 1.030x |
+| Iteration | 0.992x | 0.994x |
+| Churn | 1.039x | 1.041x |
+
+The aggregate hides individual regressions. At 262,144 entries, u64 churn's
+median ratio was 0.892x, corresponding to about 12.1% more time per operation;
+its three round ratios ranged from 0.720x to 1.289x. At 32 entries, C string
+updates had a 0.930x median ratio. The raw medians and MADs are retained so these
+cases remain visible.
+
+Checksums, final sizes, current and peak table-owned bytes, allocation counts,
+and capacities matched in all 192 paired scenario comparisons. The map and
+iterator layouts are unchanged by this batch. Those allocation measurements
+exclude dataset storage, allocator overhead, and stack objects.
+
+An earlier variant tested candidate fingerprints before applying the first-empty
+boundary. It produced a repeatable slowdown on large C string misses by reading
+extra candidate keys. That version was replaced with the branchless prefix
+mask, which preserves the original comparison boundary. These results do not
+claim that fhmap is the fastest of the comparison libraries.
