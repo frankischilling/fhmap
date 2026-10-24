@@ -55,6 +55,8 @@ def main():
         parser.error('use unique positive counts, positive samples, and at least two rounds')
     if args.cpu not in os.sched_getaffinity(0):
         parser.error('CPU is outside this process affinity')
+    if args.report == args.report.with_suffix('.jsonl'):
+        parser.error('report must use a different path from its JSONL journal')
     if args.report.exists() or args.report.with_suffix('.jsonl').exists():
         parser.error('report destination already exists')
     args.report.parent.mkdir(parents=True, exist_ok=True)

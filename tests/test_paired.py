@@ -2,6 +2,9 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import subprocess
+import sys
+import tempfile
 
 spec = importlib.util.spec_from_file_location('paired', Path(__file__).resolve().parents[1] / 'bench/compare/run-paired.py')
 paired = importlib.util.module_from_spec(spec)
@@ -15,6 +18,15 @@ class Rows(unittest.TestCase):
 
     def test_complete(self):
         self.assertEqual(len(paired.parse_rows(self.rows, 32, 9)), 16)
+
+    def test_journal_path_cannot_be_final_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / 'results.jsonl'
+            result = subprocess.run([sys.executable, spec.origin, '--baseline', 'unused',
+                '--candidate', 'unused', '--report', str(report)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn('different path', result.stderr)
+            self.assertFalse(report.exists())
 
     def test_reject_invalid(self):
         for invalid in (self.rows + '\n' + self.rows.splitlines()[0],
