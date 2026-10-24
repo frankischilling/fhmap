@@ -510,7 +510,7 @@ its three round ratios ranged from 0.720x to 1.289x. At 32 entries, C string
 updates had a 0.930x median ratio. The raw medians and MADs are retained so these
 cases remain visible.
 
-Checksums, final sizes, current and peak table-owned bytes, allocation counts,
+Checksums, final sizes, current and peak tracked bytes, allocation counts,
 and capacities matched in all 192 paired scenario comparisons. The map and
 iterator layouts are unchanged by this batch. Those allocation measurements
 exclude dataset storage, allocator overhead, and stack objects.
