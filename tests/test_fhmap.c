@@ -290,6 +290,45 @@ static void test_probe_boundaries(void)
     }
 }
 
+static uint64_t identity_hash(const void *key, size_t size, uint64_t seed, void *user)
+{
+    uint64_t value;
+    (void)size; (void)seed; (void)user;
+    memcpy(&value, key, sizeof(value));
+    return value;
+}
+
+static bool counted_equal(const void *stored, const void *query, size_t size, void *user)
+{
+    ++*(unsigned *)user;
+    return memcmp(stored, query, size) == 0;
+}
+
+static void test_custom_equality_stops_at_empty(void)
+{
+    size_t start, offset;
+    for (start = 0; start < 64; ++start) {
+        for (offset = 1; offset < 16; ++offset) {
+            fhmap map;
+            unsigned comparisons = 0;
+            fhmap_config cfg = fhmap_config_make(sizeof(uint64_t), sizeof(uint64_t));
+            uint64_t stored = (uint64_t)((start + offset) % 64) * 128u + 37u;
+            uint64_t missing = (uint64_t)start * 128u + 37u;
+            cfg.initial_capacity = 56;
+            cfg.hash = identity_hash;
+            cfg.equal = counted_equal;
+            cfg.user = &comparisons;
+            assert(fhmap_init(&map, &cfg));
+            assert(fhmap_put(&map, &stored, &stored) == FHMAP_PUT_INSERTED);
+            assert(fhmap_get(&map, &missing) == NULL);
+            assert(comparisons == 0);
+            assert(*(uint64_t *)fhmap_get(&map, &stored) == stored);
+            assert(comparisons == 1);
+            fhmap_destroy(&map);
+        }
+    }
+}
+
 static void test_128bit_keys(void)
 {
     fhmap map;
@@ -351,6 +390,7 @@ static void test_available_masks(void)
 
 int main(void)
 {
+    test_custom_equality_stops_at_empty();
     test_128bit_keys();
     test_noop_lifetime();
     test_available_masks();
