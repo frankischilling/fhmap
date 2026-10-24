@@ -335,6 +335,75 @@ static void test_custom_equality_stops_at_empty(void)
     }
 }
 
+static void test_cached_iteration_groups(void)
+{
+    fhmap map;
+    fhmap_config cfg = fhmap_config_make(sizeof(uint64_t), sizeof(uint64_t));
+    unsigned pattern;
+    cfg.initial_capacity = 56;
+    cfg.key_align = _Alignof(uint64_t);
+    cfg.value_align = _Alignof(uint64_t);
+    cfg.hash = identity_hash;
+    assert(fhmap_init(&map, &cfg));
+    for (pattern = 0; pattern < 65536u; ++pattern) {
+        unsigned bit, seen = 0, count = 0;
+        size_t group = (pattern % 4u) * 16u;
+        const void *key_out;
+        void *value_out;
+        fhmap_iter it;
+        fhmap_clear(&map);
+        for (bit = 0; bit < 16u; ++bit) {
+            if (pattern & (1u << bit)) {
+                uint64_t key = (uint64_t)(group + bit) * 128u + 37u;
+                assert(fhmap_put(&map, &key, &key) == FHMAP_PUT_INSERTED);
+            }
+        }
+        it = fhmap_iter_begin(&map);
+        while (fhmap_iter_next(&map, &it, &key_out, &value_out)) {
+            uint64_t key = *(const uint64_t *)key_out;
+            unsigned slot = (unsigned)((key >> 7u) - group);
+            assert(slot < 16u && !(seen & (1u << slot)));
+            assert(*(uint64_t *)value_out == key);
+            seen |= 1u << slot;
+            assert(++count <= 16u);
+        }
+        assert(seen == pattern && count == fhmap_size(&map));
+        assert(it.next_index == fhmap_capacity(&map));
+        assert(!fhmap_iter_next(&map, &it, NULL, NULL));
+    }
+    fhmap_destroy(&map);
+}
+
+static void test_cached_iteration_lifetime(void)
+{
+    u64_map map;
+    u64_map_iter a, b, copy;
+    uint64_t i;
+    const uint64_t *ka, *kb;
+    uint64_t *va, *vb;
+    assert(u64_map_init_seed(&map, 48, 19));
+    for (i = 0; i < 48; ++i) assert(u64_map_put(&map, i, i) == FHMAP_PUT_INSERTED);
+    a = u64_map_iter_begin(&map);
+    b = u64_map_iter_begin(&map);
+    for (i = 0; i < 48; ++i) {
+        assert(u64_map_iter_next(&map, &a, &ka, &va));
+        assert(u64_map_iter_next(&map, &b, &kb, &vb));
+        assert(*ka == *kb && *va == *vb);
+        copy = a;
+        assert(u64_map_iter_next(&map, &copy, NULL, NULL) == (i + 1u < 48u));
+    }
+    assert(!u64_map_iter_next(&map, &a, NULL, NULL));
+    a = u64_map_iter_begin(&map);
+    assert(u64_map_iter_next(&map, &a, NULL, NULL));
+    assert(u64_map_remove(&map, 0));
+    assert(!u64_map_iter_next(&map, &a, NULL, NULL));
+    a = u64_map_iter_begin(&map);
+    assert(u64_map_iter_next(&map, &a, NULL, NULL));
+    assert(u64_map_reserve(&map, 1024));
+    assert(!u64_map_iter_next(&map, &a, NULL, NULL));
+    u64_map_destroy(&map);
+}
+
 static void test_128bit_keys(void)
 {
     fhmap map;
@@ -396,6 +465,8 @@ static void test_available_masks(void)
 
 int main(void)
 {
+    test_cached_iteration_groups();
+    test_cached_iteration_lifetime();
     test_custom_equality_stops_at_empty();
     test_128bit_keys();
     test_noop_lifetime();

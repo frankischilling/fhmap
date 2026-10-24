@@ -28,7 +28,8 @@ int main(void)
     fhmap map;
     fhmap_config cfg = fhmap_config_make(sizeof(uint64_t), sizeof(uint64_t));
     uint64_t key, value = 1234;
-    size_t before;
+    size_t before, visited;
+    fhmap_iter it;
     cfg.seed = 123;
     cfg.initial_capacity = 14;
     assert(fhmap_init(&map, &cfg));
@@ -38,9 +39,14 @@ int main(void)
     key = 1;
     assert(fhmap_put(&map, &key, &value) == FHMAP_PUT_UPDATED);
     assert(calls == before);
+    it = fhmap_iter_begin(&map);
+    assert(fhmap_iter_next(&map, &it, NULL, NULL));
+    visited = 1;
     key = 14; fail_next = 1;
     assert(fhmap_put(&map, &key, &value) == FHMAP_PUT_ERROR);
     assert(fhmap_size(&map) == 14 && fhmap_capacity(&map) == 16);
+    while (fhmap_iter_next(&map, &it, NULL, NULL)) ++visited;
+    assert(visited == 14);
     for (key = 0; key < 14; ++key)
         assert(*(uint64_t *)fhmap_get(&map, &key) == (key == 1 ? value : key));
     for (key = 0; key < 8; ++key) assert(fhmap_remove(&map, &key));

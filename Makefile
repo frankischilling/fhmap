@@ -245,6 +245,9 @@ $(BUILD)/test_fhmap_scalar: $(TEST_SRC) fhmap.h | $(BUILD)
 $(BUILD)/test_fhmap_alloc: tests/test_fhmap_alloc.c fhmap.h | $(BUILD)
 	$(CC) $(CFLAGS_COMMON) -O2 -g $< -o $@
 
+$(BUILD)/test_multiple_tu: tests/test_multiple_tu.c tests/test_multiple_tu_impl.c fhmap.h | $(BUILD)
+	$(CC) $(CFLAGS_COMMON) -O2 -g tests/test_multiple_tu.c tests/test_multiple_tu_impl.c -o $@
+
 $(BUILD)/test_bench_common: $(BENCH_COMMON_TEST_SRC) $(BENCH_COMMON_SRC) \
 		bench/compare/common/bench_common.h | $(BUILD)
 	$(CC) $(CFLAGS_COMMON) -O2 -g $(BENCH_COMMON_TEST_SRC) \
@@ -255,11 +258,12 @@ $(BUILD)/test_bench_alloc: $(BENCH_ALLOC_TEST_SRC) $(BENCH_ALLOC_SRC) \
 	$(CC) $(CFLAGS_COMMON) -O2 -g $(BENCH_ALLOC_TEST_SRC) \
 		$(BENCH_ALLOC_SRC) -o $@
 
-test: bench-compare-lock $(BUILD)/test_fhmap $(BUILD)/test_fhmap_scalar $(BUILD)/test_fhmap_alloc $(BUILD)/test_bench_common \
+test: bench-compare-lock $(BUILD)/test_fhmap $(BUILD)/test_fhmap_scalar $(BUILD)/test_fhmap_alloc $(BUILD)/test_multiple_tu $(BUILD)/test_bench_common \
 		$(BUILD)/test_bench_alloc
 	./$(BUILD)/test_fhmap
 	./$(BUILD)/test_fhmap_scalar
 	./$(BUILD)/test_fhmap_alloc
+	./$(BUILD)/test_multiple_tu
 	./$(BUILD)/test_bench_common
 	./$(BUILD)/test_bench_alloc
 

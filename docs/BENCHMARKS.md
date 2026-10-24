@@ -512,7 +512,7 @@ cases remain visible.
 
 Checksums, final sizes, current and peak tracked bytes, allocation counts,
 and capacities matched in all 192 paired scenario comparisons. The map and
-iterator layouts are unchanged by this batch. Those allocation measurements
+iterator layouts are unchanged by this probe-only batch. Those allocation measurements
 exclude dataset storage, allocator overhead, and stack objects.
 
 An earlier variant tested candidate fingerprints before applying the first-empty

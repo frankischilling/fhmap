@@ -92,6 +92,24 @@ The table tracks tombstones separately:
 Rehashing is transactional with respect to allocation failure: the old table
 remains intact until the replacement allocation is fully populated.
 
+## Iteration
+
+An iterator loads an aligned group of 16 control bytes and keeps a mask of its
+occupied slots. Each call removes the lowest set bit and returns that slot.
+Once the mask is empty, the iterator skips the rest of the group and loads the
+next one. This avoids testing control bytes one at a time and rereading a group
+for every returned entry. The same mask representation works with SSE2 and the
+scalar group scanner.
+
+Groups stop at capacity, so iteration never visits the mirrored control bytes.
+The generation check runs before the cached mask is used; structural mutations
+invalidate both. Each iterator owns its mask, allowing independent cursors and
+concurrent iteration while the map remains unchanged.
+
+The mask changes the version 2 iterator layout, adding 8 bytes on the measured
+64-bit platform. It adds no table allocation or per-entry storage. Recompile
+callers and the implementation together when upgrading the header.
+
 ## Hashing
 
 The default byte hash processes unaligned input safely with `memcpy`, mixes

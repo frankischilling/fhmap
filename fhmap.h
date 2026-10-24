@@ -32,10 +32,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FHMAP_VERSION_MAJOR 1
+#define FHMAP_VERSION_MAJOR 2
 #define FHMAP_VERSION_MINOR 0
 #define FHMAP_VERSION_PATCH 0
-#define FHMAP_VERSION_STRING "1.0.0"
+#define FHMAP_VERSION_STRING "2.0.0"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -104,9 +104,12 @@ typedef struct fhmap {
     void *user;
 } fhmap;
 
+/* Iterator state is private to the iteration functions. Version 2 adds a
+   cached group mask; rebuild the implementation and callers together. */
 typedef struct fhmap_iter {
     size_t next_index;
     uint64_t generation;
+    uint32_t occupied_mask;
 } fhmap_iter;
 
 typedef enum fhmap_put_result {
@@ -888,8 +891,7 @@ FHMAP_API double fhmap_load_factor(const fhmap *map)
 
 FHMAP_API fhmap_iter fhmap_iter_begin(const fhmap *map)
 {
-    fhmap_iter iter;
-    iter.next_index = 0;
+    fhmap_iter iter = {0};
     iter.generation = map == NULL ? 0u : map->generation;
     return iter;
 }
@@ -899,15 +901,29 @@ FHMAP_API bool fhmap_iter_next(fhmap *map, fhmap_iter *iter,
 {
     if (map == NULL || iter == NULL || iter->generation != map->generation)
         return false;
-    while (iter->next_index < map->capacity) {
-        size_t index = iter->next_index++;
-        if (map->control[index] < FHMAP_CONTROL_EMPTY) {
-            if (key_out != NULL) *key_out = fhmap__key_at(map, index);
-            if (value_out != NULL) *value_out = fhmap__value_at(map, index);
-            return true;
+    if (iter->occupied_mask == 0u) {
+        /* A consumed group can end before its last slot. Skip its remaining
+           empty slots instead of loading the same control bytes again. */
+        size_t group = (iter->next_index + FHMAP_GROUP_WIDTH - 1u) &
+                       ~(size_t)(FHMAP_GROUP_WIDTH - 1u);
+        while (group < map->capacity) {
+            iter->occupied_mask = ~fhmap__group_available(map->control + group) &
+                                  UINT32_C(0xffff);
+            if (iter->occupied_mask != 0u) break;
+            group += FHMAP_GROUP_WIDTH;
         }
+        iter->next_index = group;
+        if (group >= map->capacity) return false;
     }
-    return false;
+    /* Groups are aligned and capacity is a multiple of the group width, so
+       iteration never consumes the mirrored control bytes used by probes. */
+    size_t group = iter->next_index & ~(size_t)(FHMAP_GROUP_WIDTH - 1u);
+    size_t index = group + fhmap__first_bit(iter->occupied_mask);
+    iter->occupied_mask &= iter->occupied_mask - 1u;
+    iter->next_index = index + 1u;
+    if (key_out != NULL) *key_out = fhmap__key_at(map, index);
+    if (value_out != NULL) *value_out = fhmap__value_at(map, index);
+    return true;
 }
 
 #undef FHMAP_GROUP_WIDTH

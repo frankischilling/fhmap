@@ -10,6 +10,13 @@ compilers, caches, and tools that need a C map with no runtime dependencies
 beyond libc. Test it with your own keys and operation mix before choosing it
 for performance.
 
+## Version 2 compatibility
+
+Version 2 adds a cached control-byte mask to `fhmap_iter`. On the measured
+64-bit platform, an iterator grows from 16 to 24 bytes; map storage is unchanged.
+Rebuild the implementation and all callers together. Do not mix object files
+compiled against the old and new headers. Function signatures are unchanged.
+
 ## Highlights
 
 - One header and no runtime dependencies beyond libc

@@ -50,8 +50,16 @@ Start with `fhmap_config_make`; do not leave alignment fields at zero.
 
 ### `fhmap_iter`
 
-Iterator state returned by `fhmap_iter_begin`. It records the table generation;
-`fhmap_iter_next` returns `false` if a structural mutation invalidated it.
+Iterator state returned by `fhmap_iter_begin`. It records the table generation
+and caches the occupied slots in one control-byte group. `fhmap_iter_next`
+returns `false` if a structural mutation invalidated it. Use the iteration
+functions rather than editing its fields. Copying a valid iterator by value
+creates an independent cursor over the same unchanged map.
+
+Version 2 changes this structure's layout. Rebuild the implementation and all
+callers against the same header; old compiled callers are not binary compatible.
+On the measured 64-bit build, the structure grows from 16 to 24 bytes. The
+`fhmap` table object and its allocations are unchanged.
 
 ## Configuration and lifetime
 
