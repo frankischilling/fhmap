@@ -157,12 +157,19 @@ FHMAP_API fhmap_iter fhmap_iter_begin(const fhmap *map);
 FHMAP_API bool fhmap_iter_next(fhmap *map, fhmap_iter *iter,
                                const void **key_out, void **value_out);
 
+/* A declaration generates the whole facade; callers may use only part of it. */
+#if defined(__GNUC__) || defined(__clang__)
+#  define FHMAP_TYPED_INLINE static inline __attribute__((unused))
+#else
+#  define FHMAP_TYPED_INLINE static inline
+#endif
+
 /* Generate a zero-overhead, typed facade over the raw map. KEY_TYPE and
    VALUE_TYPE must be complete object types and should not contain commas. */
 #define FHMAP_DECLARE(NAME, KEY_TYPE, VALUE_TYPE)                                  \
     typedef struct NAME { fhmap raw; } NAME;                                      \
     typedef fhmap_iter NAME##_iter;                                               \
-    static inline bool NAME##_init_seed(NAME *m, size_t expected, uint64_t seed)  \
+    FHMAP_TYPED_INLINE bool NAME##_init_seed(NAME *m, size_t expected, uint64_t seed)  \
     {                                                                             \
         fhmap_config c = fhmap_config_make(sizeof(KEY_TYPE), sizeof(VALUE_TYPE)); \
         c.initial_capacity = expected;                                            \
@@ -171,39 +178,39 @@ FHMAP_API bool fhmap_iter_next(fhmap *map, fhmap_iter *iter,
         c.seed = seed;                                                            \
         return fhmap_init(&m->raw, &c);                                           \
     }                                                                             \
-    static inline bool NAME##_init(NAME *m, size_t expected)                      \
+    FHMAP_TYPED_INLINE bool NAME##_init(NAME *m, size_t expected)                      \
     {                                                                             \
         return NAME##_init_seed(m, expected, fhmap_random_seed());                \
     }                                                                             \
-    static inline void NAME##_destroy(NAME *m) { fhmap_destroy(&m->raw); }        \
-    static inline void NAME##_clear(NAME *m) { fhmap_clear(&m->raw); }            \
-    static inline bool NAME##_reserve(NAME *m, size_t n)                          \
+    FHMAP_TYPED_INLINE void NAME##_destroy(NAME *m) { fhmap_destroy(&m->raw); }        \
+    FHMAP_TYPED_INLINE void NAME##_clear(NAME *m) { fhmap_clear(&m->raw); }            \
+    FHMAP_TYPED_INLINE bool NAME##_reserve(NAME *m, size_t n)                          \
     { return fhmap_reserve(&m->raw, n); }                                         \
-    static inline bool NAME##_compact(NAME *m) { return fhmap_compact(&m->raw); } \
-    static inline size_t NAME##_size(const NAME *m)                               \
+    FHMAP_TYPED_INLINE bool NAME##_compact(NAME *m) { return fhmap_compact(&m->raw); } \
+    FHMAP_TYPED_INLINE size_t NAME##_size(const NAME *m)                               \
     { return fhmap_size(&m->raw); }                                               \
-    static inline size_t NAME##_capacity(const NAME *m)                           \
+    FHMAP_TYPED_INLINE size_t NAME##_capacity(const NAME *m)                           \
     { return fhmap_capacity(&m->raw); }                                           \
-    static inline size_t NAME##_memory_usage(const NAME *m)                       \
+    FHMAP_TYPED_INLINE size_t NAME##_memory_usage(const NAME *m)                       \
     { return fhmap_memory_usage(&m->raw); }                                       \
-    static inline VALUE_TYPE *NAME##_get(NAME *m, KEY_TYPE key)                   \
+    FHMAP_TYPED_INLINE VALUE_TYPE *NAME##_get(NAME *m, KEY_TYPE key)                   \
     { return (VALUE_TYPE *)fhmap_get(&m->raw, &key); }                            \
-    static inline const VALUE_TYPE *NAME##_get_const(const NAME *m, KEY_TYPE key) \
+    FHMAP_TYPED_INLINE const VALUE_TYPE *NAME##_get_const(const NAME *m, KEY_TYPE key) \
     { return (const VALUE_TYPE *)fhmap_get_const(&m->raw, &key); }                 \
-    static inline bool NAME##_contains(const NAME *m, KEY_TYPE key)               \
+    FHMAP_TYPED_INLINE bool NAME##_contains(const NAME *m, KEY_TYPE key)               \
     { return fhmap_contains(&m->raw, &key); }                                     \
-    static inline VALUE_TYPE *NAME##_emplace(NAME *m, KEY_TYPE key, bool *is_new) \
+    FHMAP_TYPED_INLINE VALUE_TYPE *NAME##_emplace(NAME *m, KEY_TYPE key, bool *is_new) \
     { return (VALUE_TYPE *)fhmap_emplace(&m->raw, &key, is_new); }                 \
-    static inline fhmap_put_result NAME##_put(NAME *m, KEY_TYPE key,              \
+    FHMAP_TYPED_INLINE fhmap_put_result NAME##_put(NAME *m, KEY_TYPE key,              \
                                                VALUE_TYPE value)                   \
     { return fhmap_put(&m->raw, &key, &value); }                                  \
-    static inline bool NAME##_remove(NAME *m, KEY_TYPE key)                       \
+    FHMAP_TYPED_INLINE bool NAME##_remove(NAME *m, KEY_TYPE key)                       \
     { return fhmap_remove(&m->raw, &key); }                                       \
-    static inline bool NAME##_remove_copy(NAME *m, KEY_TYPE key, VALUE_TYPE *out) \
+    FHMAP_TYPED_INLINE bool NAME##_remove_copy(NAME *m, KEY_TYPE key, VALUE_TYPE *out) \
     { return fhmap_remove_copy(&m->raw, &key, out); }                             \
-    static inline NAME##_iter NAME##_iter_begin(const NAME *m)                    \
+    FHMAP_TYPED_INLINE NAME##_iter NAME##_iter_begin(const NAME *m)                    \
     { return fhmap_iter_begin(&m->raw); }                                         \
-    static inline bool NAME##_iter_next(NAME *m, NAME##_iter *it,                 \
+    FHMAP_TYPED_INLINE bool NAME##_iter_next(NAME *m, NAME##_iter *it,                 \
                                          const KEY_TYPE **key, VALUE_TYPE **value) \
     {                                                                             \
         const void *raw_key = NULL;                                               \
