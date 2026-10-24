@@ -32,10 +32,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FHMAP_VERSION_MAJOR 1
+#define FHMAP_VERSION_MAJOR 2
 #define FHMAP_VERSION_MINOR 0
 #define FHMAP_VERSION_PATCH 0
-#define FHMAP_VERSION_STRING "1.0.0"
+#define FHMAP_VERSION_STRING "2.0.0"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -104,9 +104,12 @@ typedef struct fhmap {
     void *user;
 } fhmap;
 
+/* Iterator state is private to the iteration functions. Version 2 adds a
+   cached group mask; rebuild the implementation and callers together. */
 typedef struct fhmap_iter {
     size_t next_index;
     uint64_t generation;
+    uint32_t occupied_mask;
 } fhmap_iter;
 
 typedef enum fhmap_put_result {
@@ -139,8 +142,8 @@ FHMAP_API void *fhmap_get(fhmap *map, const void *key);
 FHMAP_API const void *fhmap_get_const(const fhmap *map, const void *key);
 FHMAP_API bool fhmap_contains(const fhmap *map, const void *key);
 
-/* On a new key, emplace returns uninitialized value storage. Set *inserted to
-   true when supplied. The returned pointer is invalidated by a later structural
+/* On a new key, emplace returns uninitialized value storage and sets
+   *inserted to true when supplied. The returned pointer is invalidated by a later structural
    mutation (insert, remove, reserve, compact, clear, or destroy). */
 FHMAP_API void *fhmap_emplace(fhmap *map, const void *key, bool *inserted);
 FHMAP_API fhmap_put_result fhmap_put(fhmap *map, const void *key,
@@ -157,12 +160,19 @@ FHMAP_API fhmap_iter fhmap_iter_begin(const fhmap *map);
 FHMAP_API bool fhmap_iter_next(fhmap *map, fhmap_iter *iter,
                                const void **key_out, void **value_out);
 
-/* Generate a zero-overhead, typed facade over the raw map. KEY_TYPE and
+/* A declaration generates the whole facade; callers may use only part of it. */
+#if defined(__GNUC__) || defined(__clang__)
+#  define FHMAP_TYPED_INLINE static inline __attribute__((unused))
+#else
+#  define FHMAP_TYPED_INLINE static inline
+#endif
+
+/* Generate typed wrappers over the raw map. KEY_TYPE and
    VALUE_TYPE must be complete object types and should not contain commas. */
 #define FHMAP_DECLARE(NAME, KEY_TYPE, VALUE_TYPE)                                  \
     typedef struct NAME { fhmap raw; } NAME;                                      \
     typedef fhmap_iter NAME##_iter;                                               \
-    static inline bool NAME##_init_seed(NAME *m, size_t expected, uint64_t seed)  \
+    FHMAP_TYPED_INLINE bool NAME##_init_seed(NAME *m, size_t expected, uint64_t seed)  \
     {                                                                             \
         fhmap_config c = fhmap_config_make(sizeof(KEY_TYPE), sizeof(VALUE_TYPE)); \
         c.initial_capacity = expected;                                            \
@@ -171,39 +181,39 @@ FHMAP_API bool fhmap_iter_next(fhmap *map, fhmap_iter *iter,
         c.seed = seed;                                                            \
         return fhmap_init(&m->raw, &c);                                           \
     }                                                                             \
-    static inline bool NAME##_init(NAME *m, size_t expected)                      \
+    FHMAP_TYPED_INLINE bool NAME##_init(NAME *m, size_t expected)                      \
     {                                                                             \
         return NAME##_init_seed(m, expected, fhmap_random_seed());                \
     }                                                                             \
-    static inline void NAME##_destroy(NAME *m) { fhmap_destroy(&m->raw); }        \
-    static inline void NAME##_clear(NAME *m) { fhmap_clear(&m->raw); }            \
-    static inline bool NAME##_reserve(NAME *m, size_t n)                          \
+    FHMAP_TYPED_INLINE void NAME##_destroy(NAME *m) { fhmap_destroy(&m->raw); }        \
+    FHMAP_TYPED_INLINE void NAME##_clear(NAME *m) { fhmap_clear(&m->raw); }            \
+    FHMAP_TYPED_INLINE bool NAME##_reserve(NAME *m, size_t n)                          \
     { return fhmap_reserve(&m->raw, n); }                                         \
-    static inline bool NAME##_compact(NAME *m) { return fhmap_compact(&m->raw); } \
-    static inline size_t NAME##_size(const NAME *m)                               \
+    FHMAP_TYPED_INLINE bool NAME##_compact(NAME *m) { return fhmap_compact(&m->raw); } \
+    FHMAP_TYPED_INLINE size_t NAME##_size(const NAME *m)                               \
     { return fhmap_size(&m->raw); }                                               \
-    static inline size_t NAME##_capacity(const NAME *m)                           \
+    FHMAP_TYPED_INLINE size_t NAME##_capacity(const NAME *m)                           \
     { return fhmap_capacity(&m->raw); }                                           \
-    static inline size_t NAME##_memory_usage(const NAME *m)                       \
+    FHMAP_TYPED_INLINE size_t NAME##_memory_usage(const NAME *m)                       \
     { return fhmap_memory_usage(&m->raw); }                                       \
-    static inline VALUE_TYPE *NAME##_get(NAME *m, KEY_TYPE key)                   \
+    FHMAP_TYPED_INLINE VALUE_TYPE *NAME##_get(NAME *m, KEY_TYPE key)                   \
     { return (VALUE_TYPE *)fhmap_get(&m->raw, &key); }                            \
-    static inline const VALUE_TYPE *NAME##_get_const(const NAME *m, KEY_TYPE key) \
+    FHMAP_TYPED_INLINE const VALUE_TYPE *NAME##_get_const(const NAME *m, KEY_TYPE key) \
     { return (const VALUE_TYPE *)fhmap_get_const(&m->raw, &key); }                 \
-    static inline bool NAME##_contains(const NAME *m, KEY_TYPE key)               \
+    FHMAP_TYPED_INLINE bool NAME##_contains(const NAME *m, KEY_TYPE key)               \
     { return fhmap_contains(&m->raw, &key); }                                     \
-    static inline VALUE_TYPE *NAME##_emplace(NAME *m, KEY_TYPE key, bool *is_new) \
+    FHMAP_TYPED_INLINE VALUE_TYPE *NAME##_emplace(NAME *m, KEY_TYPE key, bool *is_new) \
     { return (VALUE_TYPE *)fhmap_emplace(&m->raw, &key, is_new); }                 \
-    static inline fhmap_put_result NAME##_put(NAME *m, KEY_TYPE key,              \
+    FHMAP_TYPED_INLINE fhmap_put_result NAME##_put(NAME *m, KEY_TYPE key,              \
                                                VALUE_TYPE value)                   \
     { return fhmap_put(&m->raw, &key, &value); }                                  \
-    static inline bool NAME##_remove(NAME *m, KEY_TYPE key)                       \
+    FHMAP_TYPED_INLINE bool NAME##_remove(NAME *m, KEY_TYPE key)                       \
     { return fhmap_remove(&m->raw, &key); }                                       \
-    static inline bool NAME##_remove_copy(NAME *m, KEY_TYPE key, VALUE_TYPE *out) \
+    FHMAP_TYPED_INLINE bool NAME##_remove_copy(NAME *m, KEY_TYPE key, VALUE_TYPE *out) \
     { return fhmap_remove_copy(&m->raw, &key, out); }                             \
-    static inline NAME##_iter NAME##_iter_begin(const NAME *m)                    \
+    FHMAP_TYPED_INLINE NAME##_iter NAME##_iter_begin(const NAME *m)                    \
     { return fhmap_iter_begin(&m->raw); }                                         \
-    static inline bool NAME##_iter_next(NAME *m, NAME##_iter *it,                 \
+    FHMAP_TYPED_INLINE bool NAME##_iter_next(NAME *m, NAME##_iter *it,                 \
                                          const KEY_TYPE **key, VALUE_TYPE **value) \
     {                                                                             \
         const void *raw_key = NULL;                                               \
@@ -357,9 +367,8 @@ FHMAP_API uint64_t fhmap_hash_bytes(const void *key, size_t key_size,
     uint64_t b = (uint64_t)key_size ^ UINT64_C(0xe7037ed1a0b428db);
     (void)user;
 
-    /* Integer and 128-bit IDs dominate many map workloads. Keeping these paths
-       branch-short avoids the generic tail state machine and one wide multiply
-       for the especially common 4- and 8-byte cases. */
+    /* Fixed 4-, 8-, and 16-byte keys skip the generic tail loop. The 4- and
+       8-byte paths also avoid the folded wide multiplication. */
     if (key_size == 4u) {
         return fhmap__avalanche((uint64_t)fhmap__load32(p) ^ seed ^
                                 UINT64_C(0xa0761d6478bd642f));
@@ -516,9 +525,7 @@ FHMAP_INLINE bool fhmap__keys_equal(const fhmap *map, const void *stored,
         case 8:
             return fhmap__load64(stored) == fhmap__load64(query);
         case 16:
-            return fhmap__load64(stored) == fhmap__load64(query) &&
-                   fhmap__load64((const unsigned char *)stored + 8u) ==
-                   fhmap__load64((const unsigned char *)query + 8u);
+            return memcmp(stored, query, 16u) == 0;
         default:
             return memcmp(stored, query, map->key_size) == 0;
     }
@@ -550,10 +557,9 @@ FHMAP_INLINE size_t fhmap__find_index_hashed(const fhmap *map, const void *key,
                                             FHMAP_CONTROL_EMPTY);
         uint32_t matches = fhmap__group_match(map->control + position,
                                               fingerprint);
-        if (empty != 0u) {
-            unsigned stop = fhmap__first_bit(empty);
-            matches &= stop == 0u ? 0u : ((UINT32_C(1) << stop) - 1u);
-        }
+        /* Keep bits through the first empty byte. That byte cannot match a
+           fingerprint; if there is no empty byte, unsigned wrap keeps all bits. */
+        matches &= empty ^ (empty - 1u);
         while (matches != 0u) {
             unsigned bit = fhmap__first_bit(matches);
             size_t index = (position + bit) & (map->capacity - 1u);
@@ -569,36 +575,34 @@ FHMAP_INLINE size_t fhmap__find_index_hashed(const fhmap *map, const void *key,
     return FHMAP_NPOS;
 }
 
+/* Empty and deleted bytes both have their high bit set. This search is used
+   only after absence has been established, so the first reusable slot wins. */
+FHMAP_INLINE uint32_t fhmap__group_available(const unsigned char *control)
+{
+#if FHMAP_HAS_SSE2
+    return (uint32_t)_mm_movemask_epi8(
+        _mm_loadu_si128((const __m128i *)(const void *)control));
+#else
+    uint32_t result = 0;
+    unsigned i;
+    for (i = 0; i < FHMAP_GROUP_WIDTH; ++i)
+        result |= (uint32_t)(control[i] >> 7u) << i;
+    return result;
+#endif
+}
+
 FHMAP_INLINE size_t fhmap__find_insert_slot(const fhmap *map, uint64_t hash)
 {
     size_t position = (size_t)(hash >> 7u) & (map->capacity - 1u);
-    size_t first_deleted = FHMAP_NPOS;
     size_t scanned = 0;
-
     while (scanned < map->capacity) {
-        uint32_t deleted = fhmap__group_match(map->control + position,
-                                              FHMAP_CONTROL_DELETED);
-        uint32_t empty = fhmap__group_match(map->control + position,
-                                            FHMAP_CONTROL_EMPTY);
-        if (empty != 0u) {
-            unsigned stop = fhmap__first_bit(empty);
-            uint32_t before = stop == 0u ? 0u : ((UINT32_C(1) << stop) - 1u);
-            deleted &= before;
-            if (first_deleted == FHMAP_NPOS && deleted != 0u) {
-                first_deleted = (position + fhmap__first_bit(deleted)) &
-                                (map->capacity - 1u);
-            }
-            if (first_deleted != FHMAP_NPOS) return first_deleted;
-            return (position + stop) & (map->capacity - 1u);
-        }
-        if (first_deleted == FHMAP_NPOS && deleted != 0u) {
-            first_deleted = (position + fhmap__first_bit(deleted)) &
-                            (map->capacity - 1u);
-        }
+        uint32_t available = fhmap__group_available(map->control + position);
+        if (available != 0u)
+            return (position + fhmap__first_bit(available)) & (map->capacity - 1u);
         position = (position + FHMAP_GROUP_WIDTH) & (map->capacity - 1u);
         scanned += FHMAP_GROUP_WIDTH;
     }
-    return first_deleted;
+    return FHMAP_NPOS;
 }
 
 static bool fhmap__capacity_for(size_t elements, size_t *capacity_out)
@@ -887,8 +891,7 @@ FHMAP_API double fhmap_load_factor(const fhmap *map)
 
 FHMAP_API fhmap_iter fhmap_iter_begin(const fhmap *map)
 {
-    fhmap_iter iter;
-    iter.next_index = 0;
+    fhmap_iter iter = {0};
     iter.generation = map == NULL ? 0u : map->generation;
     return iter;
 }
@@ -898,15 +901,29 @@ FHMAP_API bool fhmap_iter_next(fhmap *map, fhmap_iter *iter,
 {
     if (map == NULL || iter == NULL || iter->generation != map->generation)
         return false;
-    while (iter->next_index < map->capacity) {
-        size_t index = iter->next_index++;
-        if (map->control[index] < FHMAP_CONTROL_EMPTY) {
-            if (key_out != NULL) *key_out = fhmap__key_at(map, index);
-            if (value_out != NULL) *value_out = fhmap__value_at(map, index);
-            return true;
+    if (iter->occupied_mask == 0u) {
+        /* A consumed group can end before its last slot. Skip its remaining
+           empty slots instead of loading the same control bytes again. */
+        size_t group = (iter->next_index + FHMAP_GROUP_WIDTH - 1u) &
+                       ~(size_t)(FHMAP_GROUP_WIDTH - 1u);
+        while (group < map->capacity) {
+            iter->occupied_mask = ~fhmap__group_available(map->control + group) &
+                                  UINT32_C(0xffff);
+            if (iter->occupied_mask != 0u) break;
+            group += FHMAP_GROUP_WIDTH;
         }
+        iter->next_index = group;
+        if (group >= map->capacity) return false;
     }
-    return false;
+    /* Groups are aligned and capacity is a multiple of the group width, so
+       iteration never consumes the mirrored control bytes used by probes. */
+    size_t group = iter->next_index & ~(size_t)(FHMAP_GROUP_WIDTH - 1u);
+    size_t index = group + fhmap__first_bit(iter->occupied_mask);
+    iter->occupied_mask &= iter->occupied_mask - 1u;
+    iter->next_index = index + 1u;
+    if (key_out != NULL) *key_out = fhmap__key_at(map, index);
+    if (value_out != NULL) *value_out = fhmap__value_at(map, index);
+    return true;
 }
 
 #undef FHMAP_GROUP_WIDTH

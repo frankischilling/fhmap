@@ -224,7 +224,7 @@ BENCH_SRC := bench/bench_fhmap.c
 export FHMAP_BENCH_CC = $(CC)
 export FHMAP_BENCH_CFLAGS = $(BENCH_COMPARE_CFLAGS)
 
-.PHONY: all test clang-test sanitize bench bench-compare-lock \
+.PHONY: all test test-paired clang-test sanitize bench bench-compare-lock \
 	bench-compare-fetch bench-compare-build bench-compare-smoke \
 	bench-compare-fetch-force bench-compare clean
 
@@ -239,6 +239,15 @@ $(BENCH_COMPARE_BUILD): | $(BUILD)
 $(BUILD)/test_fhmap: $(TEST_SRC) fhmap.h | $(BUILD)
 	$(CC) $(CFLAGS_COMMON) -O2 -g $(TEST_SRC) -o $@
 
+$(BUILD)/test_fhmap_scalar: $(TEST_SRC) fhmap.h | $(BUILD)
+	$(CC) $(CFLAGS_COMMON) -O2 -g -DFHMAP_DISABLE_SIMD $(TEST_SRC) -o $@
+
+$(BUILD)/test_fhmap_alloc: tests/test_fhmap_alloc.c fhmap.h | $(BUILD)
+	$(CC) $(CFLAGS_COMMON) -O2 -g $< -o $@
+
+$(BUILD)/test_multiple_tu: tests/test_multiple_tu.c tests/test_multiple_tu_impl.c fhmap.h | $(BUILD)
+	$(CC) $(CFLAGS_COMMON) -O2 -g tests/test_multiple_tu.c tests/test_multiple_tu_impl.c -o $@
+
 $(BUILD)/test_bench_common: $(BENCH_COMMON_TEST_SRC) $(BENCH_COMMON_SRC) \
 		bench/compare/common/bench_common.h | $(BUILD)
 	$(CC) $(CFLAGS_COMMON) -O2 -g $(BENCH_COMMON_TEST_SRC) \
@@ -249,11 +258,18 @@ $(BUILD)/test_bench_alloc: $(BENCH_ALLOC_TEST_SRC) $(BENCH_ALLOC_SRC) \
 	$(CC) $(CFLAGS_COMMON) -O2 -g $(BENCH_ALLOC_TEST_SRC) \
 		$(BENCH_ALLOC_SRC) -o $@
 
-test: bench-compare-lock $(BUILD)/test_fhmap $(BUILD)/test_bench_common \
+test: bench-compare-lock $(BUILD)/test_fhmap $(BUILD)/test_fhmap_scalar $(BUILD)/test_fhmap_alloc $(BUILD)/test_multiple_tu $(BUILD)/test_bench_common \
 		$(BUILD)/test_bench_alloc
 	./$(BUILD)/test_fhmap
+	./$(BUILD)/test_fhmap_scalar
+	./$(BUILD)/test_fhmap_alloc
+	./$(BUILD)/test_multiple_tu
 	./$(BUILD)/test_bench_common
 	./$(BUILD)/test_bench_alloc
+
+# Python is needed only for the optional paired performance-report tooling.
+test-paired:
+	python3 tests/test_paired.py
 
 clang-test: $(BENCH_COMPARE_TYPED_CLANG) | $(BUILD) $(BENCH_COMPARE_BUILD)
 	clang $(CFLAGS_COMMON) -O2 -g $(TEST_SRC) -o $(BUILD)/test_fhmap_clang

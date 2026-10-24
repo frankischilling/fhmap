@@ -249,8 +249,229 @@ static void test_differential_random_operations(void)
     u64_map_destroy(&map);
 }
 
+/* Check every probe start, including loads through the mirrored tail. */
+static uint64_t positioned_hash(const void *key, size_t key_size,
+                                uint64_t seed, void *user)
+{
+    (void)key; (void)key_size; (void)seed;
+    return *(const uint64_t *)user;
+}
+
+static void test_probe_boundaries(void)
+{
+    size_t start;
+    for (start = 0; start < 64u; ++start) {
+        uint64_t hash = ((uint64_t)start << 7u) | 37u;
+        fhmap_config cfg = fhmap_config_make(sizeof(uint64_t), sizeof(uint64_t));
+        fhmap map;
+        uint64_t key;
+        cfg.initial_capacity = 56;
+        cfg.hash = positioned_hash;
+        cfg.user = &hash;
+        assert(fhmap_init(&map, &cfg));
+        assert(map.capacity == 64u);
+        for (key = 0; key < 48u; ++key)
+            assert(fhmap_put(&map, &key, &key) == FHMAP_PUT_INSERTED);
+        /* Holes in the first and subsequent groups must not hide duplicates. */
+        for (key = 0; key < 48u; key += 7u) assert(fhmap_remove(&map, &key));
+        for (key = 0; key < 48u; ++key) {
+            bool erased = key % 7u == 0u;
+            const uint64_t *value = fhmap_get_const(&map, &key);
+            assert(erased ? value == NULL : value != NULL && *value == key);
+            if (!erased) assert(fhmap_put(&map, &key, &key) == FHMAP_PUT_UPDATED);
+        }
+        key = 1000;
+        assert(fhmap_get_const(&map, &key) == NULL);
+        assert(fhmap_put(&map, &key, &key) == FHMAP_PUT_INSERTED);
+        assert(*(uint64_t *)fhmap__key_at(&map, start) == key);
+        assert(fhmap_compact(&map));
+        assert(*(uint64_t *)fhmap_get(&map, &key) == key);
+        fhmap_destroy(&map);
+    }
+}
+
+static uint64_t identity_hash(const void *key, size_t size, uint64_t seed, void *user)
+{
+    uint64_t value;
+    (void)size; (void)seed; (void)user;
+    memcpy(&value, key, sizeof(value));
+    return value;
+}
+
+static bool counted_equal(const void *stored, const void *query, size_t size, void *user)
+{
+    ++*(unsigned *)user;
+    return memcmp(stored, query, size) == 0;
+}
+
+static void test_custom_equality_stops_at_empty(void)
+{
+    size_t start, stop, offset;
+    for (start = 0; start < 64; ++start) {
+        for (stop = 0; stop < 16; ++stop) {
+            fhmap map;
+            unsigned comparisons = 0;
+            fhmap_config cfg = fhmap_config_make(sizeof(uint64_t), sizeof(uint64_t));
+            uint64_t stored, missing = ((uint64_t)start * 128u + 37u) | (UINT64_C(1) << 32);
+            cfg.initial_capacity = 56;
+            cfg.hash = identity_hash;
+            cfg.equal = counted_equal;
+            cfg.user = &comparisons;
+            assert(fhmap_init(&map, &cfg));
+            for (offset = 0; offset < 16; ++offset) {
+                if (offset == stop) continue;
+                stored = (uint64_t)((start + offset) % 64) * 128u + 37u;
+                assert(fhmap_put(&map, &stored, &stored) == FHMAP_PUT_INSERTED);
+            }
+            comparisons = 0;
+            assert(fhmap_get(&map, &missing) == NULL);
+            assert(comparisons == stop);
+            stored = (uint64_t)((start + (stop == 0 ? 1u : 0u)) % 64) * 128u + 37u;
+            comparisons = 0;
+            assert(*(uint64_t *)fhmap_get(&map, &stored) == stored);
+            assert(comparisons == 1);
+            fhmap_destroy(&map);
+        }
+    }
+}
+
+static void test_cached_iteration_groups(void)
+{
+    fhmap map;
+    fhmap_config cfg = fhmap_config_make(sizeof(uint64_t), sizeof(uint64_t));
+    unsigned pattern;
+    cfg.initial_capacity = 56;
+    cfg.key_align = _Alignof(uint64_t);
+    cfg.value_align = _Alignof(uint64_t);
+    cfg.hash = identity_hash;
+    assert(fhmap_init(&map, &cfg));
+    for (pattern = 0; pattern < 65536u; ++pattern) {
+        unsigned bit, seen = 0, count = 0;
+        size_t group = (pattern % 4u) * 16u;
+        const void *key_out;
+        void *value_out;
+        fhmap_iter it;
+        fhmap_clear(&map);
+        for (bit = 0; bit < 16u; ++bit) {
+            if (pattern & (1u << bit)) {
+                uint64_t key = (uint64_t)(group + bit) * 128u + 37u;
+                assert(fhmap_put(&map, &key, &key) == FHMAP_PUT_INSERTED);
+            }
+        }
+        it = fhmap_iter_begin(&map);
+        while (fhmap_iter_next(&map, &it, &key_out, &value_out)) {
+            uint64_t key = *(const uint64_t *)key_out;
+            unsigned slot = (unsigned)((key >> 7u) - group);
+            assert(slot < 16u && !(seen & (1u << slot)));
+            assert(*(uint64_t *)value_out == key);
+            seen |= 1u << slot;
+            assert(++count <= 16u);
+        }
+        assert(seen == pattern && count == fhmap_size(&map));
+        assert(it.next_index == fhmap_capacity(&map));
+        assert(!fhmap_iter_next(&map, &it, NULL, NULL));
+    }
+    fhmap_destroy(&map);
+}
+
+static void test_cached_iteration_lifetime(void)
+{
+    u64_map map;
+    u64_map_iter a, b, copy;
+    uint64_t i;
+    const uint64_t *ka, *kb;
+    uint64_t *va, *vb;
+    assert(u64_map_init_seed(&map, 48, 19));
+    for (i = 0; i < 48; ++i) assert(u64_map_put(&map, i, i) == FHMAP_PUT_INSERTED);
+    a = u64_map_iter_begin(&map);
+    b = u64_map_iter_begin(&map);
+    for (i = 0; i < 48; ++i) {
+        assert(u64_map_iter_next(&map, &a, &ka, &va));
+        assert(u64_map_iter_next(&map, &b, &kb, &vb));
+        assert(*ka == *kb && *va == *vb);
+        copy = a;
+        assert(u64_map_iter_next(&map, &copy, NULL, NULL) == (i + 1u < 48u));
+    }
+    assert(!u64_map_iter_next(&map, &a, NULL, NULL));
+    a = u64_map_iter_begin(&map);
+    assert(u64_map_iter_next(&map, &a, NULL, NULL));
+    assert(u64_map_remove(&map, 0));
+    assert(!u64_map_iter_next(&map, &a, NULL, NULL));
+    a = u64_map_iter_begin(&map);
+    assert(u64_map_iter_next(&map, &a, NULL, NULL));
+    assert(u64_map_reserve(&map, 1024));
+    assert(!u64_map_iter_next(&map, &a, NULL, NULL));
+    u64_map_destroy(&map);
+}
+
+static void test_128bit_keys(void)
+{
+    fhmap map;
+    fhmap_config cfg = fhmap_config_make(2 * sizeof(uint64_t), sizeof(uint64_t));
+    uint64_t key[2], value;
+    cfg.hash = constant_hash;
+    cfg.seed = 17;
+    assert(fhmap_init(&map, &cfg));
+    for (value = 0; value < 128; ++value) {
+        key[0] = value & 15u;
+        key[1] = value >> 4u;
+        assert(fhmap_put(&map, key, &value) == FHMAP_PUT_INSERTED);
+    }
+    for (value = 0; value < 128; ++value) {
+        key[0] = value & 15u;
+        key[1] = value >> 4u;
+        assert(*(uint64_t *)fhmap_get(&map, key) == value);
+        key[1] += 16;
+        assert(fhmap_get(&map, key) == NULL);
+        key[0] += 16; key[1] -= 16;
+        assert(fhmap_get(&map, key) == NULL);
+    }
+    fhmap_destroy(&map);
+}
+
+static void test_noop_lifetime(void)
+{
+    u64_map map;
+    fhmap_iter it;
+    size_t generation;
+    assert(u64_map_init_seed(&map, 1, 17));
+    assert(u64_map_put(&map, 1, 2) == FHMAP_PUT_INSERTED);
+    generation = map.raw.generation;
+    it = u64_map_iter_begin(&map);
+    assert(!fhmap_init(&map.raw, NULL));
+    assert(u64_map_reserve(&map, 1));
+    assert(u64_map_compact(&map));
+    assert(!u64_map_remove(&map, 9));
+    assert(u64_map_put(&map, 1, 3) == FHMAP_PUT_UPDATED);
+    assert(map.raw.generation == generation);
+    assert(u64_map_iter_next(&map, &it, NULL, NULL));
+    assert(*u64_map_get(&map, 1) == 3);
+    u64_map_destroy(&map);
+}
+
+static void test_available_masks(void)
+{
+    unsigned char control[32];
+    unsigned offset, mask, bit;
+    for (offset = 0; offset < 16u; ++offset) {
+        for (mask = 0; mask < 65536u; ++mask) {
+            for (bit = 0; bit < 16u; ++bit)
+                control[offset + bit] = (unsigned char)((mask & (1u << bit))
+                    ? (bit & 1u ? 0xfeu : 0x80u) : (bit * 7u));
+            assert(fhmap__group_available(control + offset) == mask);
+        }
+    }
+}
+
 int main(void)
 {
+    test_cached_iteration_groups();
+    test_cached_iteration_lifetime();
+    test_custom_equality_stops_at_empty();
+    test_128bit_keys();
+    test_noop_lifetime();
+    test_available_masks();
+    test_probe_boundaries();
     test_basic_typed_api();
     test_emplace_and_alignment();
     test_extreme_collisions_and_tombstones();

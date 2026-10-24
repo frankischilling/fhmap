@@ -2,9 +2,8 @@
 
 The comparison suite runs `fhmap` and ten pinned C hash map implementations
 through the same driver. It covers `uint64_t` keys and borrowed C string keys.
-Treat its output as a measurement of one build and host, not as a general
-ordering of the libraries. The suite does not cover every implementation or
-workload in the catalog supplied for this work.
+Results apply to the measured build, host, and workloads. The suite covers
+eleven implementations; it cannot establish a ranking across all hash maps.
 
 ## Requirements
 
@@ -393,7 +392,7 @@ peak byte results are unchanged. Current requested bytes range from `1,287` at
 cover the table-owned allocation scope described above, not total process
 memory.
 
-## Optimization experiments
+## Earlier optimization experiments
 
 Neither measured experiment passed its acceptance gates, so no core
 optimization was retained.
@@ -419,13 +418,105 @@ string reserved insertion at 32 entries rose 74.789%. The comparison executable
 grew from 48,680 to 56,872 bytes, and its text size grew from 33,878 to 44,250
 bytes. The candidate was removed.
 
-The original insertion path and out-of-line raw API boundary remain in
-`fhmap.h`. A generated typed fast path could be evaluated under a separate
-issue, with its own portability, code-size, correctness, memory, and
-same-session performance checks. The results here do not predict whether that
-approach would pass.
+Those experiments left the original insertion path and out-of-line raw API
+boundary unchanged. They do not establish whether a generated typed fast path
+would improve performance; that needs its own portability, code-size, memory,
+and repeated timing checks.
 
-The original performance target was not met. This work added a reproducible
-representative suite and measured two hypotheses, but it did not make fhmap
-faster or establish that it beats the untested maps and workloads outside the
-suite.
+That earlier work added the comparison suite but retained no core optimization.
+Its results do not establish superiority over untested maps or workloads.
+
+## Paired comparisons of a core change
+
+Use `bench/compare/run-paired.py` when comparing two builds of fhmap. It runs
+both executables on the same logical CPU, reverses their order in alternate
+rounds, and keeps all per-run medians and MADs. Each executable is copied before
+timing, so rebuilding it during a run cannot mix versions in the report.
+Python 3 and Linux `taskset` are required for this optional tool.
+
+Build both executables with the same compiler and flags, using separate
+checkouts for the baseline and candidate. In each checkout:
+
+```sh
+cc -std=c11 -Wall -Wextra -Wpedantic -Wconversion -Wshadow \
+  -O3 -DNDEBUG -march=native \
+  bench/compare/common/bench_driver.c \
+  bench/compare/common/bench_common.c \
+  bench/compare/common/bench_alloc.c \
+  bench/compare/adapters/fhmap_adapter.c -o /tmp/fhmap-baseline
+```
+
+Change the output name to `/tmp/fhmap-candidate` for the candidate checkout.
+Then run:
+
+```sh
+python3 bench/compare/run-paired.py \
+  --baseline /tmp/fhmap-baseline --candidate /tmp/fhmap-candidate \
+  --counts 32,4096,262144,1048576 --samples 9 --rounds 3 \
+  --report build/paired.json
+```
+
+The default CPU is the first CPU allowed by the process affinity; `--cpu`
+selects another. Do not run competing benchmarks on that CPU. The JSON report
+records the executable hashes, host, seed, settings, and raw result rows.
+A companion JSONL journal preserves completed runs if a later run fails.
+Existing report paths are not overwritten.
+
+A speedup ratio above 1 means the candidate took less time. The summary uses
+the median paired ratio for each scenario, then their equal-weight geometric
+mean. Inspect the individual rounds and regressions as well as that aggregate.
+The runner refuses incomplete matrices, failed results, or differences in
+checksums, final sizes, allocation counts, bytes, and capacity. This strict
+memory check is intended for probe optimizations that leave the layout intact;
+changes to allocation policy need a separate evaluation.
+
+Paired runs reduce timing drift but do not remove shared-host interference or
+frequency changes. A comparison against the same executable can still report
+an apparent gain. Do not call a small aggregate difference an optimization
+without checking repeated results and the affected workloads.
+
+## Control-byte probe measurements, October 2026
+
+The [paired report](../bench/results/2026-10-24-probes-paired.json) compares
+`1167cb0c5dc32b497061101d065cd13521600e8e` with the probe changes at
+`de000a15f929eed20ae0ec81977920e5bdc7dba1`. Both binaries used GCC 14.2,
+`-O3 -DNDEBUG -march=native`, on an AMD EPYC 9V74 host pinned to CPU 0.
+The candidate also used `-Werror`, which changes diagnostics rather than
+optimization. Executable and header hashes are recorded in the report.
+
+There were three alternating rounds, nine samples per scenario, and the four
+default counts. Across the 64 scenarios, the geometric mean of the median
+paired speedup ratios was **1.0821x**, or 8.2% higher throughput. Forty-four
+scenario medians improved. This is a shared-host observation, not a guarantee
+for another machine or workload.
+
+The following ratios combine the four counts for each key type and operation.
+Values above 1 favor the candidate.
+
+| Operation | u64 | C string |
+|---|---:|---:|
+| Reserved insertion | 1.041x | 1.019x |
+| Growing insertion | 1.181x | 1.121x |
+| Update | 1.001x | 1.005x |
+| Successful lookup | 1.049x | 1.048x |
+| Failed lookup | 1.479x | 1.346x |
+| Erase | 1.040x | 1.030x |
+| Iteration | 0.992x | 0.994x |
+| Churn | 1.039x | 1.041x |
+
+The aggregate hides individual regressions. At 262,144 entries, u64 churn's
+median ratio was 0.892x, corresponding to about 12.1% more time per operation;
+its three round ratios ranged from 0.720x to 1.289x. At 32 entries, C string
+updates had a 0.930x median ratio. The raw medians and MADs are retained so these
+cases remain visible.
+
+Checksums, final sizes, current and peak tracked bytes, allocation counts,
+and capacities matched in all 192 paired scenario comparisons. The map and
+iterator layouts are unchanged by this probe-only batch. Those allocation measurements
+exclude dataset storage, allocator overhead, and stack objects.
+
+An earlier variant tested candidate fingerprints before applying the first-empty
+boundary. It produced a repeatable slowdown on large C string misses by reading
+extra candidate keys. That version was replaced with the branchless prefix
+mask, which preserves the original comparison boundary. These results do not
+claim that fhmap is the fastest of the comparison libraries.

@@ -2,10 +2,10 @@
 
 ## Goals
 
-`fhmap` prioritizes lookup throughput, compact ownership, predictable
-allocation behavior, and a small integration surface. It deliberately uses
-fixed-size keys and values: that constraint lets the table keep all slot data
-inline without allocating or chasing a node per entry.
+`fhmap` keeps fixed-size keys and values inline in one allocation. Lookups
+filter candidates through control bytes before reading keys, and growing the
+table allocates a replacement block. There are no per-entry nodes to allocate
+or follow.
 
 ## Allocation layout
 
@@ -48,14 +48,24 @@ control bytes, then advances by 16 and wraps with a bit mask. For each group:
 
 1. Compare all control bytes to the seven-bit fingerprint.
 2. Run full key equality only for matching fingerprints.
-3. Stop at the first empty byte; tombstones do not stop a lookup.
+3. If no candidate matches, stop when the group contains an empty byte.
+   Tombstones do not stop a lookup.
+
+Lookup masks out candidate fingerprints beyond the first empty bucket before
+comparing keys. The prefix mask uses unsigned subtraction and XOR, avoiding a
+bit scan, variable shift, and conditional branch. When there is no empty byte,
+unsigned wraparound leaves every candidate bit enabled. The first empty byte
+itself cannot match a fingerprint.
+
+Keeping this boundary matters for borrowed strings and other custom equality
+functions: a spurious candidate can otherwise require an extra pointer read
+and an expensive comparison.
 
 At normal load factors, a missing lookup commonly ends after one group and no
 full key comparisons. Fingerprints have a 1/128 accidental match probability
 before accounting for the number of occupied bytes examined.
 
-Linear group probing is intentionally simple. It offers sequential control-byte
-loads and avoids pointer chasing. A maximum load factor of 7/8 leaves enough
+Linear group probing reads consecutive groups of control bytes. A maximum load factor of 7/8 leaves enough
 empty buckets to bound expected probe lengths under a well-distributed hash.
 
 ## Insertion and deletion
@@ -63,7 +73,10 @@ empty buckets to bound expected probe lengths under a well-distributed hash.
 Insertion first performs a lookup so updating an existing key cannot trigger an
 unnecessary growth. A new entry uses the earliest tombstone before the first
 empty bucket in its probe sequence, or that empty bucket when no tombstone was
-seen.
+seen. Both available control-byte values have their high bit set. After the
+lookup proves the key is absent, insertion uses one high-bit mask per group and
+stops at its first set bit. It does not need separate empty and deleted masks
+or a second scan past a reusable tombstone. Rehashing uses the same slot search.
 
 Deletion converts an occupied control byte to a tombstone. Converting it
 directly to empty could make a later key in the same probe chain unreachable.
@@ -78,6 +91,24 @@ The table tracks tombstones separately:
 
 Rehashing is transactional with respect to allocation failure: the old table
 remains intact until the replacement allocation is fully populated.
+
+## Iteration
+
+An iterator loads an aligned group of 16 control bytes and keeps a mask of its
+occupied slots. Each call removes the lowest set bit and returns that slot.
+Once the mask is empty, the iterator skips the rest of the group and loads the
+next one. This avoids testing control bytes one at a time and rereading a group
+for every returned entry. The same mask representation works with SSE2 and the
+scalar group scanner.
+
+Groups stop at capacity, so iteration never visits the mirrored control bytes.
+The generation check runs before the cached mask is used; structural mutations
+invalidate both. Each iterator owns its mask, allowing independent cursors and
+concurrent iteration while the map remains unchanged.
+
+The mask changes the version 2 iterator layout, adding 8 bytes on the measured
+64-bit platform. It adds no table allocation or per-entry storage. Recompile
+callers and the implementation together when upgrading the header.
 
 ## Hashing
 
@@ -107,7 +138,7 @@ collide. Random seeding prevents an attacker from cheaply reusing a collision
 set prepared for a known seed, but the default hash is not a cryptographic
 denial-of-service defense.
 
-## Intentional non-features
+## Scope
 
 - No implicit ownership for pointers, strings, or nested resources
 - No variable-length inline keys
@@ -116,6 +147,5 @@ denial-of-service defense.
 - No stable iteration order
 - No stable element addresses across structural mutations
 
-These policies keep the hot path and object model small. Ownership, arenas,
-locking, or serialization can be layered around the raw API according to the
-application.
+The application owns referenced resources and supplies any locking or
+serialization it needs.
