@@ -546,14 +546,8 @@ FHMAP_INLINE size_t fhmap__find_index_hashed(const fhmap *map, const void *key,
     size_t scanned = 0;
 
     while (scanned < map->capacity) {
-        uint32_t empty = fhmap__group_match(map->control + position,
-                                            FHMAP_CONTROL_EMPTY);
         uint32_t matches = fhmap__group_match(map->control + position,
                                               fingerprint);
-        if (empty != 0u) {
-            unsigned stop = fhmap__first_bit(empty);
-            matches &= stop == 0u ? 0u : ((UINT32_C(1) << stop) - 1u);
-        }
         while (matches != 0u) {
             unsigned bit = fhmap__first_bit(matches);
             size_t index = (position + bit) & (map->capacity - 1u);
@@ -562,43 +556,44 @@ FHMAP_INLINE size_t fhmap__find_index_hashed(const fhmap *map, const void *key,
             }
             matches &= matches - 1u;
         }
-        if (empty != 0u) return FHMAP_NPOS;
+        /* A matching key cannot lie past an empty bucket in its probe
+           sequence. Check candidates first, avoiding the empty mask on hits. */
+        if (fhmap__group_match(map->control + position,
+                              FHMAP_CONTROL_EMPTY) != 0u) return FHMAP_NPOS;
         position = (position + FHMAP_GROUP_WIDTH) & (map->capacity - 1u);
         scanned += FHMAP_GROUP_WIDTH;
     }
     return FHMAP_NPOS;
 }
 
+/* Empty and deleted bytes both have their high bit set. This search is used
+   only after absence has been established, so the first reusable slot wins. */
+FHMAP_INLINE uint32_t fhmap__group_available(const unsigned char *control)
+{
+#if FHMAP_HAS_SSE2
+    return (uint32_t)_mm_movemask_epi8(
+        _mm_loadu_si128((const __m128i *)(const void *)control));
+#else
+    uint32_t result = 0;
+    unsigned i;
+    for (i = 0; i < FHMAP_GROUP_WIDTH; ++i)
+        result |= (uint32_t)(control[i] >> 7u) << i;
+    return result;
+#endif
+}
+
 FHMAP_INLINE size_t fhmap__find_insert_slot(const fhmap *map, uint64_t hash)
 {
     size_t position = (size_t)(hash >> 7u) & (map->capacity - 1u);
-    size_t first_deleted = FHMAP_NPOS;
     size_t scanned = 0;
-
     while (scanned < map->capacity) {
-        uint32_t deleted = fhmap__group_match(map->control + position,
-                                              FHMAP_CONTROL_DELETED);
-        uint32_t empty = fhmap__group_match(map->control + position,
-                                            FHMAP_CONTROL_EMPTY);
-        if (empty != 0u) {
-            unsigned stop = fhmap__first_bit(empty);
-            uint32_t before = stop == 0u ? 0u : ((UINT32_C(1) << stop) - 1u);
-            deleted &= before;
-            if (first_deleted == FHMAP_NPOS && deleted != 0u) {
-                first_deleted = (position + fhmap__first_bit(deleted)) &
-                                (map->capacity - 1u);
-            }
-            if (first_deleted != FHMAP_NPOS) return first_deleted;
-            return (position + stop) & (map->capacity - 1u);
-        }
-        if (first_deleted == FHMAP_NPOS && deleted != 0u) {
-            first_deleted = (position + fhmap__first_bit(deleted)) &
-                            (map->capacity - 1u);
-        }
+        uint32_t available = fhmap__group_available(map->control + position);
+        if (available != 0u)
+            return (position + fhmap__first_bit(available)) & (map->capacity - 1u);
         position = (position + FHMAP_GROUP_WIDTH) & (map->capacity - 1u);
         scanned += FHMAP_GROUP_WIDTH;
     }
-    return first_deleted;
+    return FHMAP_NPOS;
 }
 
 static bool fhmap__capacity_for(size_t elements, size_t *capacity_out)

@@ -1,0 +1,38 @@
+name: Core tests
+on:
+  push:
+  pull_request:
+
+jobs:
+  correctness:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Optimized tests, including scalar probes
+        run: >-
+          make CC=${{ matrix.cc }} test
+          CFLAGS_COMMON='-std=c11 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror'
+      - name: Paired benchmark report tests
+        run: make test-paired
+      - name: Address and undefined behavior sanitizers
+        env:
+          CC: ${{ matrix.cc }}
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          for mode in simd scalar; do
+            extra=''
+            test "$mode" = simd || extra=-DFHMAP_DISABLE_SIMD
+            "$CC" -std=c11 -O1 -g -Wall -Wextra -Werror \
+              -fno-omit-frame-pointer -fsanitize=address,undefined \
+              $extra tests/test_fhmap.c -o build/test_sanitize_$mode
+            ./build/test_sanitize_$mode
+          done
+          "$CC" -std=c11 -O1 -g -Wall -Wextra -Werror \
+            -fno-omit-frame-pointer -fsanitize=address,undefined \
+            tests/test_fhmap_alloc.c -o build/test_alloc_sanitize
+          ./build/test_alloc_sanitize

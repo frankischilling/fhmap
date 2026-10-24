@@ -48,7 +48,14 @@ control bytes, then advances by 16 and wraps with a bit mask. For each group:
 
 1. Compare all control bytes to the seven-bit fingerprint.
 2. Run full key equality only for matching fingerprints.
-3. Stop at the first empty byte; tombstones do not stop a lookup.
+3. If no candidate matches, stop when the group contains an empty byte.
+   Tombstones do not stop a lookup.
+
+The empty-byte test happens after candidate equality, so a successful lookup
+does not compute an empty mask. This is safe because insertion always uses the
+first available slot: an equal key cannot lie beyond an empty bucket along its
+probe sequence. Fingerprint collisions elsewhere in the group still require
+full key equality.
 
 At normal load factors, a missing lookup commonly ends after one group and no
 full key comparisons. Fingerprints have a 1/128 accidental match probability
@@ -63,7 +70,10 @@ empty buckets to bound expected probe lengths under a well-distributed hash.
 Insertion first performs a lookup so updating an existing key cannot trigger an
 unnecessary growth. A new entry uses the earliest tombstone before the first
 empty bucket in its probe sequence, or that empty bucket when no tombstone was
-seen.
+seen. Both available control-byte values have their high bit set. After the
+lookup proves the key is absent, insertion uses one high-bit mask per group and
+stops at its first set bit. It does not need separate empty and deleted masks
+or a second scan past a reusable tombstone. Rehashing uses the same slot search.
 
 Deletion converts an occupied control byte to a tombstone. Converting it
 directly to empty could make a later key in the same probe chain unreachable.

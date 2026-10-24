@@ -249,8 +249,65 @@ static void test_differential_random_operations(void)
     u64_map_destroy(&map);
 }
 
+/* Check every probe start, including loads through the mirrored tail. */
+static uint64_t positioned_hash(const void *key, size_t key_size,
+                                uint64_t seed, void *user)
+{
+    (void)key; (void)key_size; (void)seed;
+    return *(const uint64_t *)user;
+}
+
+static void test_probe_boundaries(void)
+{
+    size_t start;
+    for (start = 0; start < 64u; ++start) {
+        uint64_t hash = ((uint64_t)start << 7u) | 37u;
+        fhmap_config cfg = fhmap_config_make(sizeof(uint64_t), sizeof(uint64_t));
+        fhmap map;
+        uint64_t key;
+        cfg.initial_capacity = 56;
+        cfg.hash = positioned_hash;
+        cfg.user = &hash;
+        assert(fhmap_init(&map, &cfg));
+        assert(map.capacity == 64u);
+        for (key = 0; key < 48u; ++key)
+            assert(fhmap_put(&map, &key, &key) == FHMAP_PUT_INSERTED);
+        /* Holes in the first and subsequent groups must not hide duplicates. */
+        for (key = 0; key < 48u; key += 7u) assert(fhmap_remove(&map, &key));
+        for (key = 0; key < 48u; ++key) {
+            bool erased = key % 7u == 0u;
+            const uint64_t *value = fhmap_get_const(&map, &key);
+            assert(erased ? value == NULL : value != NULL && *value == key);
+            if (!erased) assert(fhmap_put(&map, &key, &key) == FHMAP_PUT_UPDATED);
+        }
+        key = 1000;
+        assert(fhmap_get_const(&map, &key) == NULL);
+        assert(fhmap_put(&map, &key, &key) == FHMAP_PUT_INSERTED);
+        assert(*(uint64_t *)fhmap__key_at(&map, start) == key);
+        assert(fhmap_compact(&map));
+        assert(*(uint64_t *)fhmap_get(&map, &key) == key);
+        fhmap_destroy(&map);
+    }
+}
+
+static void test_available_masks(void)
+{
+    unsigned char control[32];
+    unsigned offset, mask, bit;
+    for (offset = 0; offset < 16u; ++offset) {
+        for (mask = 0; mask < 65536u; ++mask) {
+            for (bit = 0; bit < 16u; ++bit)
+                control[offset + bit] = (unsigned char)((mask & (1u << bit))
+                    ? (bit & 1u ? 0xfeu : 0x80u) : (bit * 7u));
+            assert(fhmap__group_available(control + offset) == mask);
+        }
+    }
+}
+
 int main(void)
 {
+    test_available_masks();
+    test_probe_boundaries();
     test_basic_typed_api();
     test_emplace_and_alignment();
     test_extreme_collisions_and_tombstones();
