@@ -16,6 +16,10 @@ jobs:
         run: >-
           make CC=${{ matrix.cc }} test
           CFLAGS_COMMON='-std=c11 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror'
+      - name: Strict O3 core tests
+        run: |
+          ${{ matrix.cc }} -std=c11 -O3 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror tests/test_fhmap.c -o build/test_o3
+          ./build/test_o3
       - name: Paired benchmark report tests
         run: make test-paired
       - name: Address and undefined behavior sanitizers

@@ -522,9 +522,7 @@ FHMAP_INLINE bool fhmap__keys_equal(const fhmap *map, const void *stored,
         case 8:
             return fhmap__load64(stored) == fhmap__load64(query);
         case 16:
-            return fhmap__load64(stored) == fhmap__load64(query) &&
-                   fhmap__load64((const unsigned char *)stored + 8u) ==
-                   fhmap__load64((const unsigned char *)query + 8u);
+            return memcmp(stored, query, 16u) == 0;
         default:
             return memcmp(stored, query, map->key_size) == 0;
     }

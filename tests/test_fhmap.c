@@ -290,6 +290,31 @@ static void test_probe_boundaries(void)
     }
 }
 
+static void test_128bit_keys(void)
+{
+    fhmap map;
+    fhmap_config cfg = fhmap_config_make(2 * sizeof(uint64_t), sizeof(uint64_t));
+    uint64_t key[2], value;
+    cfg.hash = constant_hash;
+    cfg.seed = 17;
+    assert(fhmap_init(&map, &cfg));
+    for (value = 0; value < 128; ++value) {
+        key[0] = value & 15u;
+        key[1] = value >> 4u;
+        assert(fhmap_put(&map, key, &value) == FHMAP_PUT_INSERTED);
+    }
+    for (value = 0; value < 128; ++value) {
+        key[0] = value & 15u;
+        key[1] = value >> 4u;
+        assert(*(uint64_t *)fhmap_get(&map, key) == value);
+        key[1] += 16;
+        assert(fhmap_get(&map, key) == NULL);
+        key[0] += 16; key[1] -= 16;
+        assert(fhmap_get(&map, key) == NULL);
+    }
+    fhmap_destroy(&map);
+}
+
 static void test_noop_lifetime(void)
 {
     u64_map map;
@@ -326,6 +351,7 @@ static void test_available_masks(void)
 
 int main(void)
 {
+    test_128bit_keys();
     test_noop_lifetime();
     test_available_masks();
     test_probe_boundaries();
