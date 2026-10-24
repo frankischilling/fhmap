@@ -2,10 +2,10 @@
 
 ## Goals
 
-`fhmap` prioritizes lookup throughput, compact ownership, predictable
-allocation behavior, and a small integration surface. It deliberately uses
-fixed-size keys and values: that constraint lets the table keep all slot data
-inline without allocating or chasing a node per entry.
+`fhmap` keeps fixed-size keys and values inline in one allocation. Lookups
+filter candidates through control bytes before reading keys, and growing the
+table allocates a replacement block. There are no per-entry nodes to allocate
+or follow.
 
 ## Allocation layout
 
@@ -61,8 +61,7 @@ At normal load factors, a missing lookup commonly ends after one group and no
 full key comparisons. Fingerprints have a 1/128 accidental match probability
 before accounting for the number of occupied bytes examined.
 
-Linear group probing is intentionally simple. It offers sequential control-byte
-loads and avoids pointer chasing. A maximum load factor of 7/8 leaves enough
+Linear group probing reads consecutive groups of control bytes. A maximum load factor of 7/8 leaves enough
 empty buckets to bound expected probe lengths under a well-distributed hash.
 
 ## Insertion and deletion
@@ -117,7 +116,7 @@ collide. Random seeding prevents an attacker from cheaply reusing a collision
 set prepared for a known seed, but the default hash is not a cryptographic
 denial-of-service defense.
 
-## Intentional non-features
+## Scope
 
 - No implicit ownership for pointers, strings, or nested resources
 - No variable-length inline keys
@@ -126,6 +125,5 @@ denial-of-service defense.
 - No stable iteration order
 - No stable element addresses across structural mutations
 
-These policies keep the hot path and object model small. Ownership, arenas,
-locking, or serialization can be layered around the raw API according to the
-application.
+The application owns referenced resources and supplies any locking or
+serialization it needs.

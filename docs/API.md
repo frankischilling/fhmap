@@ -1,13 +1,13 @@
 # fhmap API reference
 
-## Integration model
+## Including the header
 
 `fhmap.h` contains declarations, typed wrappers, and an implementation section.
 Define `FHMAP_IMPLEMENTATION` in exactly one C file before including the header.
 The library requires a C11 compiler on Linux.
 
-All functions whose name begins with `fhmap_` are part of the public raw API.
-Names beginning with `fhmap__` are implementation details.
+The functions listed here form the public raw API. Names beginning with
+`fhmap__` are implementation details.
 
 `FHMAP_VERSION_MAJOR`, `FHMAP_VERSION_MINOR`, `FHMAP_VERSION_PATCH`, and
 `FHMAP_VERSION_STRING` expose the header version at compile time.
@@ -64,9 +64,10 @@ when returned key/value pointers will be dereferenced as typed objects.
 ### `bool fhmap_init(fhmap *map, const fhmap_config *config)`
 
 Initializes `map`. Returns `false` for an invalid configuration, arithmetic
-overflow, or allocation failure. On failure, `map` is zeroed and does not need
-destruction. Reinitializing a live map leaks its old allocation; destroy it
-first.
+overflow, or allocation failure. With non-NULL arguments, it zeroes `map`
+before validating the configuration, so a failed initialization needs no
+destruction. A NULL `config` leaves `map` untouched. Destroy a live map before
+initializing it again; otherwise its old allocation is leaked.
 
 Alignments must be powers of two no greater than `FHMAP_MAX_ALIGNMENT`.
 
@@ -100,7 +101,7 @@ is already compact. A rehash invalidates pointers and iterators.
 ### `const void *fhmap_get_const(const fhmap *map, const void *key)`
 
 Return the value storage for `key`, or `NULL` if absent/invalid. Expected
-average complexity is O(1). The pointer remains valid until a structural
+lookup complexity is O(1). The pointer remains valid until a structural
 mutation; the non-const form permits in-place value updates.
 
 ### `bool fhmap_contains(const fhmap *map, const void *key)`
@@ -110,13 +111,12 @@ Returns whether `key` exists.
 ### `void *fhmap_emplace(fhmap *map, const void *key, bool *inserted)`
 
 Returns value storage for `key`, inserting the key if needed. When the key is
-new, the value bytes are intentionally uninitialized and `*inserted` is set to
+new, the value bytes are uninitialized and `*inserted` is set to
 `true`. For an existing key they are unchanged and `*inserted` is `false`.
 `inserted` may be `NULL`. A `NULL` return indicates invalid input or allocation
 failure.
 
-This is the lowest-copy insertion path: initialize a new large value directly
-in its final slot.
+Use this to initialize a large value directly in its table slot.
 
 ### `fhmap_put_result fhmap_put(fhmap *map, const void *key, const void *value)`
 
@@ -171,8 +171,10 @@ pointer may be `NULL`. Iteration order is unspecified and changes after a
 rehash, seed change, or different insertion history. Editing the bytes of a
 value through `value_out` is allowed. Do not edit a key.
 
-Insertion, removal, clear, reserve, compact, and destroy invalidate the
-iterator. Replacing an existing value through `fhmap_put` does not.
+Inserting a new key, successful removal, clear, and rehash invalidate the
+iterator. Reserve and compact invalidate it when they rehash. Replacing an
+existing value through `fhmap_put` leaves the iterator valid. Do not use an
+iterator after destroying its map.
 
 ## Hash and equality callbacks
 
@@ -200,7 +202,7 @@ bytes, with specialized 4-, 8-, and 16-byte paths.
 `const char *` and operate on pointed-to string contents. The string remains
 owned by the caller.
 
-## Typed facade
+## Typed wrappers
 
 At file scope:
 
@@ -221,7 +223,7 @@ NAME_emplace / NAME_put / NAME_remove / NAME_remove_copy
 NAME_iter_begin / NAME_iter_next
 ```
 
-The wrappers pass keys and values by value for convenience. For unusually large
+The wrappers pass keys and values by value. For unusually large
 key types, the raw pointer API can avoid the wrapper's temporary copy.
 
 The macro uses byte hash/equality. Struct keys must have deterministic padding;

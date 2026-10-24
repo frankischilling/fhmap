@@ -290,6 +290,26 @@ static void test_probe_boundaries(void)
     }
 }
 
+static void test_noop_lifetime(void)
+{
+    u64_map map;
+    fhmap_iter it;
+    size_t generation;
+    assert(u64_map_init_seed(&map, 1, 17));
+    assert(u64_map_put(&map, 1, 2) == FHMAP_PUT_INSERTED);
+    generation = map.raw.generation;
+    it = u64_map_iter_begin(&map);
+    assert(!fhmap_init(&map.raw, NULL));
+    assert(u64_map_reserve(&map, 1));
+    assert(u64_map_compact(&map));
+    assert(!u64_map_remove(&map, 9));
+    assert(u64_map_put(&map, 1, 3) == FHMAP_PUT_UPDATED);
+    assert(map.raw.generation == generation);
+    assert(u64_map_iter_next(&map, &it, NULL, NULL));
+    assert(*u64_map_get(&map, 1) == 3);
+    u64_map_destroy(&map);
+}
+
 static void test_available_masks(void)
 {
     unsigned char control[32];
@@ -306,6 +326,7 @@ static void test_available_masks(void)
 
 int main(void)
 {
+    test_noop_lifetime();
     test_available_masks();
     test_probe_boundaries();
     test_basic_typed_api();

@@ -139,8 +139,8 @@ FHMAP_API void *fhmap_get(fhmap *map, const void *key);
 FHMAP_API const void *fhmap_get_const(const fhmap *map, const void *key);
 FHMAP_API bool fhmap_contains(const fhmap *map, const void *key);
 
-/* On a new key, emplace returns uninitialized value storage. Set *inserted to
-   true when supplied. The returned pointer is invalidated by a later structural
+/* On a new key, emplace returns uninitialized value storage and sets
+   *inserted to true when supplied. The returned pointer is invalidated by a later structural
    mutation (insert, remove, reserve, compact, clear, or destroy). */
 FHMAP_API void *fhmap_emplace(fhmap *map, const void *key, bool *inserted);
 FHMAP_API fhmap_put_result fhmap_put(fhmap *map, const void *key,
@@ -164,7 +164,7 @@ FHMAP_API bool fhmap_iter_next(fhmap *map, fhmap_iter *iter,
 #  define FHMAP_TYPED_INLINE static inline
 #endif
 
-/* Generate a zero-overhead, typed facade over the raw map. KEY_TYPE and
+/* Generate typed wrappers over the raw map. KEY_TYPE and
    VALUE_TYPE must be complete object types and should not contain commas. */
 #define FHMAP_DECLARE(NAME, KEY_TYPE, VALUE_TYPE)                                  \
     typedef struct NAME { fhmap raw; } NAME;                                      \
@@ -364,9 +364,8 @@ FHMAP_API uint64_t fhmap_hash_bytes(const void *key, size_t key_size,
     uint64_t b = (uint64_t)key_size ^ UINT64_C(0xe7037ed1a0b428db);
     (void)user;
 
-    /* Integer and 128-bit IDs dominate many map workloads. Keeping these paths
-       branch-short avoids the generic tail state machine and one wide multiply
-       for the especially common 4- and 8-byte cases. */
+    /* Fixed 4-, 8-, and 16-byte keys skip the generic tail loop. The 4- and
+       8-byte paths also avoid the folded wide multiplication. */
     if (key_size == 4u) {
         return fhmap__avalanche((uint64_t)fhmap__load32(p) ^ seed ^
                                 UINT64_C(0xa0761d6478bd642f));

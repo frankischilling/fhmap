@@ -2,9 +2,8 @@
 
 The comparison suite runs `fhmap` and ten pinned C hash map implementations
 through the same driver. It covers `uint64_t` keys and borrowed C string keys.
-Treat its output as a measurement of one build and host, not as a general
-ordering of the libraries. The suite does not cover every implementation or
-workload in the catalog supplied for this work.
+Results apply to the measured build, host, and workloads. The suite covers
+eleven implementations; it cannot establish a ranking across all hash maps.
 
 ## Requirements
 
@@ -393,7 +392,7 @@ peak byte results are unchanged. Current requested bytes range from `1,287` at
 cover the table-owned allocation scope described above, not total process
 memory.
 
-## Optimization experiments
+## Earlier optimization experiments
 
 Neither measured experiment passed its acceptance gates, so no core
 optimization was retained.
@@ -419,16 +418,13 @@ string reserved insertion at 32 entries rose 74.789%. The comparison executable
 grew from 48,680 to 56,872 bytes, and its text size grew from 33,878 to 44,250
 bytes. The candidate was removed.
 
-The original insertion path and out-of-line raw API boundary remain in
-`fhmap.h`. A generated typed fast path could be evaluated under a separate
-issue, with its own portability, code-size, correctness, memory, and
-same-session performance checks. The results here do not predict whether that
-approach would pass.
+Those experiments left the original insertion path and out-of-line raw API
+boundary unchanged. They do not establish whether a generated typed fast path
+would improve performance; that needs its own portability, code-size, memory,
+and repeated timing checks.
 
-The original performance target was not met. This work added a reproducible
-representative suite and measured two hypotheses, but it did not make fhmap
-faster or establish that it beats the untested maps and workloads outside the
-suite.
+That earlier work added the comparison suite but retained no core optimization.
+Its results do not establish superiority over untested maps or workloads.
 
 ## Paired comparisons of a core change
 
